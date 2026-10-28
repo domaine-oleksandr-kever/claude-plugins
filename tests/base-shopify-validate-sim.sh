@@ -29,6 +29,8 @@ const mode = process.env.SV_FAKE || 'valid';
 const log = (o) => fs.appendFileSync(rec, JSON.stringify(o) + '\n');
 log({ pid: process.pid, argv: process.argv.slice(2), liquid: process.env.LIQUID, optOut: process.env.OPT_OUT_INSTRUMENTATION });
 if (mode === 'exit') process.exit(4);
+// exitcache = the half-written _npx install: exits early while the dir is there, a server once it is gone
+if (mode === 'exitcache' && fs.existsSync(process.env.npm_config_cache + '/_npx/8f00c70bd5114901')) process.exit(4);
 // hang = npx still installing: silent, ends on stdin EOF. stall = up, then silent: only the kill ends it.
 // The self-exit at 15 s keeps a regressed script from stalling the suite.
 if (mode === 'hang' || mode === 'stall') setTimeout(() => process.exit(9), 15000);
@@ -151,6 +153,22 @@ if [ -z "$v10" ]; then ok; else bad V10-unavailable "$v10"; fi
 rc=0; : > "$REC"; npm_config_cache="$TMP/npmc" SV_FAKE=exit SV_REC="$REC" PATH="$SHIM:$PATH" "$NODE" "$SV" --code 'x' >"$O" 2>"$E" </dev/null || rc=$?
 if [ "$rc" -eq 3 ] && grep -q "^error=server_exited_early code=4 .*delete $TMP/npmc/_npx/8f00c70bd5114901 " "$E"; then ok
 else bad V10b-exit-early "$(show)"; fi
+
+# V10c: the _npx dir exists and npx exits early → the dir is deleted once and the second spawn answers
+NPXD="$TMP/npmc/_npx/8f00c70bd5114901"
+mkdir -p "$NPXD/node_modules/@shopify"
+rc=0; : > "$REC"; npm_config_cache="$TMP/npmc" SV_FAKE=exitcache SV_REC="$REC" PATH="$SHIM:$PATH" "$NODE" "$SV" --code 'query { shop { name } }' >"$O" 2>"$E" </dev/null || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(first)" = "result=valid" ] && grep -qx "note=npx_cache_reset dir=$NPXD" "$E" && [ ! -e "$NPXD" ] \
+   && [ "$(recq 'r.filter(x => x.pid).length')" = 2 ] && [ "$(recq 'r[r.length - 1].tool')" = validate ]; then ok
+else bad V10c-cache-reset-retry "$(show) rec=$(tr '\n' ';' < "$REC" | head -c 300)"; fi
+
+# V10d: the retry exits early too → unavailable after exactly two spawns, the hint says the dir went once
+mkdir -p "$NPXD/node_modules/@shopify"
+rc=0; : > "$REC"; npm_config_cache="$TMP/npmc" SV_FAKE=exit SV_REC="$REC" PATH="$SHIM:$PATH" "$NODE" "$SV" --code 'x' >"$O" 2>"$E" </dev/null || rc=$?
+if [ "$rc" -eq 3 ] && [ "$(cat "$O")" = "result=unavailable" ] && grep -qx "note=npx_cache_reset dir=$NPXD" "$E" \
+   && grep -q "^error=server_exited_early code=4 hint=offline, or npm cannot install: $NPXD was already deleted once$" "$E" \
+   && [ ! -e "$NPXD" ] && [ "$(recq 'r.filter(x => x.pid).length')" = 2 ]; then ok
+else bad V10d-cache-reset-once "$(show) rec=$(tr '\n' ';' < "$REC" | head -c 300)"; fi
 
 # V11: a server that answered and then stalls is abandoned at --timeout, and killed
 start=$SECONDS

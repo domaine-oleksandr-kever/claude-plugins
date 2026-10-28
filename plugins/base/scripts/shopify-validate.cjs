@@ -9,7 +9,9 @@
  * never the caller's prompt) for a conversationId → validate. No temp files. The child is killed
  * when the run ends, except when it never sent one JSON-RPC line: npx may still be unpacking
  * into its `_npx` cache, and a kill there leaves a half-written install every later npx run fails
- * on. That child is left to finish the install and exit on stdin EOF.
+ * on. That child is left to finish the install and exit on stdin EOF. When npx exits before the
+ * server spoke and that `_npx` dir exists, the dir is deleted once (`note=npx_cache_reset` on stderr)
+ * and npx spawned again.
  *
  * Usage:
  *   node shopify-validate.cjs [--file <path> | --code '<graphql>'] [--version <YYYY-MM>]
@@ -24,8 +26,8 @@
  * stdout: `result=valid|invalid|unavailable` first, then the server's detail text verbatim.
  * Exit 0 = valid, 1 = invalid, 2 = usage, 3 = unavailable (no npx, spawn failure, timeout, protocol
  * error, BASE_SHOPIFY_VALIDATE=0) with one `error=<code>` line on stderr; `server_exited_early`
- * (npx exited before the server spoke) names the `_npx` dir to delete. Validation never blocks:
- * a caller sends the operation anyway on 3 and lets the API judge it.
+ * (npx exited before the server spoke, after the one cache reset) names the `_npx` dir.
+ * Validation never blocks: a caller sends the operation anyway on 3 and lets the API judge it.
  * Node built-ins only; child_process is required lazily.
  */
 'use strict';
@@ -109,7 +111,7 @@ function textOf(result) {
   return ((result && result.content) || []).filter((c) => c && c.type === 'text').map((c) => c.text).join('\n');
 }
 
-function run(opts, content) {
+function run(opts, content, retried) {
   const { spawn } = require('child_process');
   const win = process.platform === 'win32';
   const spec = '@shopify/dev-mcp@latest';
@@ -150,9 +152,26 @@ function run(opts, content) {
   child.on('error', (e) => finish(() => unavailable(e.code === 'ENOENT' ? 'npx_missing' : 'spawn_failed', e.message)));
   child.on('exit', (code, signal) => {
     const how = 'code=' + code + (signal ? ' signal=' + signal : '');
+    const dir = npxDir(spec);
+    if (!done && !serverUp && !retried && fs.existsSync(dir)) {
+      let reset = false;
+      finish(() => {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true });
+          process.stderr.write('note=npx_cache_reset dir=' + dir + '\n');
+          reset = true;
+        } catch (e) {
+          unavailable('server_exited_early', how + ' hint=a half-written npx install: deleting ' + dir + ' failed (' + e.code + '), delete it and retry');
+        }
+      });
+      if (reset) run(opts, content, true);
+      return;
+    }
     finish(() => serverUp
       ? unavailable('server_exited', how)
-      : unavailable('server_exited_early', how + ' hint=offline, or a half-written npx install: delete ' + npxDir(spec) + ' and retry'));
+      : retried
+        ? unavailable('server_exited_early', how + ' hint=offline, or npm cannot install: ' + dir + ' was already deleted once')
+        : unavailable('server_exited_early', how + ' hint=offline, or a half-written npx install: delete ' + dir + ' and retry'));
   });
   child.stdin.on('error', () => {});
 

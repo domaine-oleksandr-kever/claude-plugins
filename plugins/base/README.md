@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.16.1**.
+Current release: **base v0.16.2**.
 
 ## Status
 
@@ -137,7 +137,7 @@ slim resizes and compacts.
 | `scripts/edit-delegation.cjs` | `hooks/conventions.cjs`, `scripts/doctor.cjs` | the edit-delegation model from the login record and `BASE_EDIT_MODEL` (one place decides): a module, no CLI |
 | `scripts/scratch-hygiene.cjs` | base's hooks module, once per session | sweeps `.claude/base-tmp` of files older than `BASE_TMP_TTL` hours and keeps it in `.git/info/exclude` |
 | `scripts/qa-stores.cjs` | a QA engineer by hand; `/qa:preflight` reads it | the QA store registry, one file per machine (`~/.config/domaine/qa-stores.json`, dir 0700, file 0600): `list`, `get <store>` (the only command that prints a password; `--field password\|alias\|defaultTheme\|domain\|notes` prints that one value raw, nothing for a field the store lacks), `find`, `set`, `unset`, `path` |
-| `scripts/shopify-validate.cjs` | `/base:shopify` where no dev-mcp server is loaded (a cloud session) | validates one Admin GraphQL document through `npx -y @shopify/dev-mcp@latest` over stdio: `--file`, `--code` or stdin, `--version` (default `2026-10`); prints `result=valid\|invalid\|unavailable` and the server's detail text; exit 0 / 1 / 3 (unavailable: send the operation anyway), 2 = usage; a timeout before the server speaks leaves `npx` to finish its install instead of killing it, and `error=server_exited_early` names the `_npx` dir to delete |
+| `scripts/shopify-validate.cjs` | `/base:shopify` where no dev-mcp server is loaded (a cloud session) | validates one Admin GraphQL document through `npx -y @shopify/dev-mcp@latest` over stdio: `--file`, `--code` or stdin, `--version` (default `2026-10`); prints `result=valid\|invalid\|unavailable` and the server's detail text; exit 0 / 1 / 3 (unavailable: send the operation anyway), 2 = usage; a timeout before the server speaks leaves `npx` to finish its install instead of killing it, and when `npx` exits before the server speaks it deletes the spec's `_npx` dir once (a half-written install; `note=npx_cache_reset` on stderr) and retries, else `error=server_exited_early` names that dir |
 
 ## Skills
 
@@ -628,7 +628,7 @@ Agents never read `.env` themselves.
 | `tests/base-scripts-sim.sh` | `scripts/worktree-setup.sh` against scratch git repos (branches, ports, removal guards, the `--copy` list, the `settings.local.json` registration) and the `scripts/scratch-hygiene.cjs` sweep, and `scripts/edit-delegation.cjs` (the model per login record, credit gate and override) |
 | `tests/base-review-flow-sim.sh` | `scripts/review-scope.sh` against scratch git repos: the base, the merge-base, the hash over tracked and untracked work, the build-dirtied exclusion, the `--check` marker verdicts (fresh / stale / other-branch / none, read-only, per worktree), bash 3.2 |
 | `tests/base-qa-stores-sim.sh` | `scripts/qa-stores.cjs`: `list`, `get` (JSON and `--field` raw values, a missing field prints nothing, an unknown field is a usage error), `find`, `set`, `unset`, `path`, file and dir modes, the password printed by `get` only |
-| `tests/base-shopify-validate-sim.sh` | `scripts/shopify-validate.cjs` against a fake `npx` on `PATH`: the handshake and the constant prompt, valid / invalid, stray frames, every unavailable shape incl. `server_exited_early` and its `_npx` dir, a plain `INVALID` status, the timeout and the kill after the server spoke, no kill while `npx` still installs, `BASE_SHOPIFY_VALIDATE=0`, usage; `SIM_LIVE=1` adds two cases against the real server |
+| `tests/base-shopify-validate-sim.sh` | `scripts/shopify-validate.cjs` against a fake `npx` on `PATH`: the handshake and the constant prompt, valid / invalid, stray frames, every unavailable shape incl. `server_exited_early` and its `_npx` dir, the one `_npx` cache reset and retry (answering, and exiting early again), a plain `INVALID` status, the timeout and the kill after the server spoke, no kill while `npx` still installs, `BASE_SHOPIFY_VALIDATE=0`, usage; `SIM_LIVE=1` adds two cases against the real server |
 
 [ARCHITECTURE.md](ARCHITECTURE.md) tells how the pieces fit: the mods, the atoms that band reads,
 and why some checks stay scripts.

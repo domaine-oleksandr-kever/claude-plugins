@@ -80,7 +80,8 @@ the recipes target):
 - **Neither answers within its budget** (`result=unavailable`, exit 3, a timeout) → send anyway; the
   API judges and the runner returns its error. Validation never blocks. After one `unavailable`
   with `error=timeout` or `error=server_exited*`, skip validation for the rest of the session and
-  say so once; `server_exited_early` carries the `_npx` dir to delete, relay it to the developer.
+  say so once; the script already deleted a half-written `_npx` install once and retried, so
+  `server_exited_early` means offline or npm cannot install: relay its hint to the developer.
 - Invalid → fix and validate again (the same `artifactId`, `revision` + 1).
 - **Scopes:** the `Required scopes` line is a lower bound, and often absent for a write
   (`metafieldsSet`, `metafieldDefinitionCreate` name none). Such a write needs the owner type's
