@@ -5773,46 +5773,103 @@ dc() { # dc <label> <want-rc> <want-substr|-> <args…> (stdin passes through)
   if grep -qF "$SENT" "$DCD/out"; then bad "$label-sentinel" "the checked text reached the output"; return; fi
   ok
 }
+# DC1–DC8: the four-item field — the good file is a real draft of the new format
 cat > "$DCD/stt.md" <<MD
-1. **Theme:** UAT store, theme \`[ELC-1] QA\` (id 123); open its preview. $SENT
-
-2. **Where:** page \`/products/x\` (admin: Online Store > Themes > Customize). The section is **Scent notes**.
-   - **Heading** → \`Notes\`, then **Save**.
-
-3. On \`/products/x\`, scroll to Scent notes. You should see the heading.
-
-4. **Edge cases:**
-   - blank heading → the section hides.
-
-5. **Context / out of scope:**
-   - new setting **Heading**, default empty.
+1. **Theme:** DEV UK store, theme **<confirm with the TL>**; \`Online Store > Themes > <theme> > Preview\`. Market: United Kingdom. $SENT
+2. **Object:** \`Theme settings > Delivery Banner\`; the banner on collection and product pages; the cart drawer **Delivery** row.
+3. **Setup:**
+   - **Enable Delivery Banner** on, **Message Variation**: **Free over a threshold**, **Delivery Threshold** and **Standard Delivery Cost** as plain numbers, one with pence (e.g. 40, 2.95), then **Save**;
+   - a cart below the threshold, no free-delivery offer.
+4. **Edge cases / not obvious:**
+   - a value saved earlier with a symbol (£40) is still valid;
+   - comma decimals (2,95) are not supported;
+   - blank or 0: no threshold banner, by design;
+   - non-GB markets: cart row only, amount not currency-converted.
 MD
 dc DC1-stt-good 0 'result=ok' file stt "$DCD/stt.md"
-grep -q '^template=general$' "$DCD/out" && grep -q '^items=5$' "$DCD/out" && ok || bad DC1-stt-counts "$(tr '\n' ';' < "$DCD/out")"
+grep -q '^items=4$' "$DCD/out" && grep -q '^words=108$' "$DCD/out" && ok || bad DC1-stt-counts "$(tr '\n' ';' < "$DCD/out")"
+grep -q '^template=' "$DCD/out" && bad DC1-no-template-key "$(tr '\n' ';' < "$DCD/out")" || ok
 cat > "$DCD/bug.md" <<MD
-1. **Theme:** UAT store, theme 123. $SENT
-2. **Why the bug happened:** the heading wrapped.
-3. **What was changed to fix it:** the heading keeps one line.
-4. **What to expect:** on the long-name product, e.g. \`/products/x\`.
-   - **Mobile, 375 px:** open it. You should see one line;
-   - **Regression:** the heading wraps again.
+1. **Theme:** Prod — elc-us-jm-prod, theme **rc/2.6.0** (187617706179); \`Online Store > Themes > rc/2.6.0 > Preview\`. Not JM UAT: it has no **Size** filter. $SENT
+2. **Object:** product cards in the **FHR collection grid** (\`/collections/…\`) and **Fredhopper search grid** (\`/search?q=…\`).
+3. **Setup:**
+   - a product with 3+ sizes, one Unlisted but published to the Online Store;
+   - a collection holding it without a Fredhopper enforced filter, and a search term returning it.
+4. **Edge cases / not obvious:** product-level filters (e.g. fragrance family) do not trim.
 MD
-dc DC2-stt-bug-good 0 'template=bug' file stt "$DCD/bug.md"
+dc DC2-stt-bug-good 0 'result=ok' file stt "$DCD/bug.md"
 sed 's/^1\. \*\*Theme:\*\*/1. Theme:/' "$DCD/stt.md" > "$DCD/stt-notheme.md"
 dc DC3-stt-no-theme 1 'fail item 1 is not the **Theme:** line' file stt "$DCD/stt-notheme.md"
-grep -v 'Edge cases' "$DCD/stt.md" | sed 's/^5\./4./' > "$DCD/stt-noedge.md"
-dc DC4-stt-missing-item 1 'fail item missing: Edge cases' file stt "$DCD/stt-noedge.md"
+sed 's/^2\. \*\*Object:\*\*/2. **Where:**/' "$DCD/stt.md" > "$DCD/stt-noobject.md"
+dc DC4-stt-missing-object 1 'fail item missing: Object' file stt "$DCD/stt-noobject.md"
+sed 's/^3\. \*\*Setup:\*\*/3. **Setup recipe:**/' "$DCD/stt.md" > "$DCD/stt-nosetup.md"
+dc DC4b-stt-missing-setup 1 'fail item missing: Setup' file stt "$DCD/stt-nosetup.md"
+sed 's/^4\. \*\*Edge cases \/ not obvious:\*\*/4. **Edge cases:**/' "$DCD/stt.md" > "$DCD/stt-noedge.md"
+dc DC4c-stt-missing-edge 1 'fail item missing: Edge cases / not obvious' file stt "$DCD/stt-noedge.md"
+printf '5. **Context / out of scope:** the threshold copy is not in this ticket.\n' | cat "$DCD/stt.md" - > "$DCD/stt-five.md"
+dc DC4d-stt-fifth-item 1 'fail not 4 items (5)' file stt "$DCD/stt-five.md"
 { printf '## Steps\n'; cat "$DCD/stt.md"; } > "$DCD/stt-head.md"
 dc DC5-stt-heading 1 'fail heading in the field' file stt "$DCD/stt-head.md"
-sed 's/^3\. On/7. On/' "$DCD/stt.md" > "$DCD/stt-gap.md"
+sed 's/^3\. \*\*Setup/7. **Setup/' "$DCD/stt.md" > "$DCD/stt-gap.md"
 dc DC6-stt-numbering 1 'fail items not numbered through from 1' file stt "$DCD/stt-gap.md"
 : > "$DCD/empty.md"
 dc DC7-stt-empty 1 'fail file empty' file stt "$DCD/empty.md"
 dc DC8-stt-missing-file 1 'fail file missing' file stt "$DCD/nope.md"
-sed '/^5\. \*\*Context/,$d' "$DCD/stt.md" > "$DCD/stt-noctx.md"
-dc DC8b-stt-no-context 0 'result=ok' file stt "$DCD/stt-noctx.md"
-awk '/^4\. \*\*Edge cases/ { e = 1 } e && /^5\. \*\*Context/ { print "4. **Context / out of scope:**"; print "   - new setting **Heading**, default empty."; print ""; print "5. **Edge cases:**"; print "   - blank heading → the section hides."; exit } !e' "$DCD/stt.md" > "$DCD/stt-ctxfirst.md"
-dc DC8c-stt-context-not-last 1 'fail Context / out of scope is not the last item' file stt "$DCD/stt-ctxfirst.md"
+sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart below the threshold. You should see the banner./' "$DCD/stt.md" > "$DCD/stt-see.md"
+dc DC8b-stt-should-see 1 'fail expected result in the field ("should see", "Expected:", "verify")' file stt "$DCD/stt-see.md"
+sed 's/^   - blank or 0: no threshold banner, by design;/   - Expected result: no banner;/' "$DCD/stt.md" > "$DCD/stt-expected.md"
+dc DC8c-stt-expected-result 1 'fail expected result in the field' file stt "$DCD/stt-expected.md"
+sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart below the threshold, e.g. \/products\/silk-foundation./' "$DCD/stt.md" > "$DCD/stt-handle.md"
+dc DC8d-stt-eg-handle 1 'fail catalog handle in the field (data as properties, never a handle)' file stt "$DCD/stt-handle.md"
+sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart holding `\/products\/silk-foundation`./' "$DCD/stt.md" > "$DCD/stt-handle2.md"
+dc DC8e-stt-bare-handle 1 'fail catalog handle in the field' file stt "$DCD/stt-handle2.md"
+sed 's|^2\. \*\*Object:\*\* .*|2. **Object:** collection pages (`/collections/…`) and `/products/…`.|' "$DCD/stt.md" > "$DCD/stt-placeholder.md"
+dc DC8f-stt-placeholder-path 0 'result=ok' file stt "$DCD/stt-placeholder.md"
+awk '{ print } /^2\. / { print "   - the cart drawer row." }' "$DCD/stt.md" > "$DCD/stt-nest2.md"
+dc DC8g-stt-bullet-under-2 1 'fail nested bullet under item 2 (only under items 3 and 4)' file stt "$DCD/stt-nest2.md"
+awk '{ print } /^1\. / { print "   - Market: United Kingdom." }' "$DCD/stt.md" > "$DCD/stt-nest1.md"
+dc DC8h-stt-bullet-under-1 1 'fail nested bullet under item 1' file stt "$DCD/stt-nest1.md"
+awk '{ print } /^   - a cart below/ { print "      - a second level." }' "$DCD/stt.md" > "$DCD/stt-deep.md"
+dc DC8i-stt-two-levels 1 'fail bullet nested more than one level' file stt "$DCD/stt-deep.md"
+{ cat "$DCD/stt.md"; for i in 1 2 3 4 5 6; do printf '   - one more boundary clause that QA would otherwise misread here;\n'; done; } > "$DCD/stt-long.md"
+dc DC8j-stt-over-160-words 1 'fail over 160 words (168)' file stt "$DCD/stt-long.md"
+sed '$d' "$DCD/stt-long.md" > "$DCD/stt-158.md"
+dc DC8k-stt-158-words 0 'words=158' file stt "$DCD/stt-158.md"
+grep -qx 'warn=over-120-target' "$DCD/out" && ok || bad DC8k-warn "$(tr '\n' ';' < "$DCD/out")"
+node "$DC" file stt "$DCD/stt.md" | grep -q '^warn=' && bad DC8k2-no-warn-at-108 "warn under the target" || ok
+head -n 12 "$DCD/stt-long.md" > "$DCD/stt-128.md"
+dc DC8k4-stt-128-words 0 'words=128' file stt "$DCD/stt-128.md"
+tail -n 1 "$DCD/out" | grep -qx 'warn=over-120-target' && ok || bad DC8k4-warn-last "$(tr '\n' ';' < "$DCD/out")"
+# DC8l–DC8z: old-format content inside the four labels — every form fails on its own
+dc_stt() { # dc_stt <label> <want-substr> <sed-expr>: one edit of the good file, which must fail
+  sed "$3" "$DCD/stt.md" > "$DCD/stt-v.md"; dc "$1" 1 "$2" file stt "$DCD/stt-v.md"
+}
+EXP='fail expected result in the field'
+OLDF='fail old-format text in the field'
+HND='fail catalog handle in the field'
+CART='s/^   - a cart below the threshold, no free-delivery offer\./'
+dc_stt DC8l-stt-you-should-now-see "$EXP" "${CART}   - a cart below it; you should now see the banner say Free./"
+dc_stt DC8m-stt-you-will-see "$EXP" "${CART}   - a cart below it. You will see the banner./"
+dc_stt DC8n-stt-bare-expected "$EXP" "${CART}   - Expected: the Delivery row shows 2.95./"
+dc_stt DC8o-stt-verify "$EXP" "${CART}   - a cart below it; verify the banner displays Free./"
+dc_stt DC8p-stt-confirm-that "$EXP" "${CART}   - a cart below it; confirm that the row updates./"
+dc_stt DC8q-stt-should-show "$EXP" "${CART}   - a cart below it; the row should show 2.95./"
+dc_stt DC8r-stt-substitution "$OLDF" "${CART}   - Handles are examples — if one is missing on your store, use any product with the same properties./"
+dc_stt DC8s-stt-why-bug "$OLDF" 's/^   - comma decimals (2,95) are not supported;/   - Why the bug happened: the parser dropped pence;/'
+dc_stt DC8t-stt-what-changed "$OLDF" 's/^   - comma decimals (2,95) are not supported;/   - What was changed: the snippet reads plain numbers;/'
+dc_stt DC8u-stt-context-item "$OLDF" 's/^   - comma decimals (2,95) are not supported;/   - Context \/ out of scope: checkout;/'
+dc_stt DC8v-stt-already-set-up "$OLDF" "${CART}   - use the product that is already set up on UAT./"
+dc_stt DC8w-stt-handle-item2 "$HND" 's|^2\. \*\*Object:\*\* .*|2. **Object:** `/products/ruby-woo-lipstick`, the **Shade picker** block.|'
+dc_stt DC8x-stt-handle-item4 "$HND" 's|^   - comma decimals (2,95) are not supported;|   - open `/products/silk-foundation` and the picker shows 40 shades;|'
+dc_stt DC8y-stt-eg-bare-handle "$HND" "${CART}   - a cart holding a lipstick, e.g. \`ruby-woo-lipstick\`./"
+dc_stt DC8z-stt-numbered-sublist 'fail numbered sub-list in the field' "${CART}   1. open the cart drawer;/"
+STRAY='fail line outside the list'
+dc_stt DC8za-stt-column0-bullet "$STRAY" 's/^   - non-GB markets/- non-GB markets/'
+dc_stt DC8zb-stt-wrapped-line "$STRAY" 's/^2\. \*\*Object:\*\* \(.*\)$/2. **Object:** \1\n   and the checkout summary./'
+{ cat "$DCD/stt.md"; printf '![setup](shot.png)\n'; } > "$DCD/stt-img.md"
+dc DC8zc-stt-image 1 'fail image in the field' file stt "$DCD/stt-img.md"
+grep -qF "$STRAY" "$DCD/out" && ok || bad DC8zc-stray "$(tr '\n' ';' < "$DCD/out")"
+dc_stt DC8zd-stt-details "fail accordion in the field" "${CART}   - <details><summary>Troubleshooting<\/summary>clear the cart<\/details>/"
 
 cat > "$DCD/pr.md" <<MD
 ## Summary
@@ -5909,13 +5966,15 @@ ESCALATE
   context: x
   options: [a]
 TXT
-dc DC20-receipt-lookup 0 'kind=lookup' receipt stt <<'TXT'
+# DC20/DC21: LOOKUP is gone — the stt drafter writes data as properties and never asks for a store lookup
+dc DC20-receipt-lookup 1 'fail LOOKUP is not a receipt kind any more' receipt stt <<'TXT'
 LOOKUP
 - store: s.myshopify.com
   handle: -
   need: a product with three scent notes
 TXT
-dc DC21-receipt-lookup-pr 1 "fail LOOKUP is the stt drafter's only" receipt pr <<'TXT'
+grep -q '^kind=lookup$' "$DCD/out" && ok || bad DC20-kind "$(tr '\n' ';' < "$DCD/out")"
+dc DC21-receipt-lookup-pr 1 'fail LOOKUP is not a receipt kind any more' receipt pr <<'TXT'
 LOOKUP
 - store: s.myshopify.com
   need: x
@@ -5923,7 +5982,7 @@ TXT
 dc DC22-receipt-written-stt 0 'kind=written' receipt stt <<TXT
 written: /repo/.claude/tasks/ELC-1/steps-to-test.md
 unconfirmed: []
-report: general, 3 steps, 1 edge case, s.myshopify.com $SENT
+report: 4 items, 2 setup bullets, 4 edge cases, 108 words $SENT
 TXT
 dc DC23-receipt-pr-no-title 1 'fail title empty' receipt pr <<'TXT'
 written: /repo/.claude/tasks/ELC-1/pr-body.md

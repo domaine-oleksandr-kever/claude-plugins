@@ -29,11 +29,8 @@ and stop.
   a free-text answer passes verbatim. Then **SendMessage the same agent** `mode: answers` + each
   question with its answer. Never answer an item yourself; a skipped item →
   `answer: skip — mark it unconfirmed`.
-- `LOOKUP` (stt only) → run each item through `/base:shopify` on its store, read-only; SendMessage
-  `mode: answers` + `lookups:` — per item the handle, `found` / `not found` / `no access`, and the
-  properties asked, one line each. Never the query output.
 - `answer:` → relay its lines to the developer as the drafter's answer.
-- `written: <path>` (+ `unconfirmed:`, `report:`, the PR fields) → run
+- `written: <path>` (+ `unconfirmed:`, `report:`, the stt drafter's optional `ac: empty`, the PR fields) → run
   `node <fe root>/scripts/drafter-check.cjs file <stt|pr|jira> "<path>"` (pr: the Theme preview table check
   is the default; add `--no-preview` only when `notes.md` holds the developer's recorded
   `preview-decision: no preview` line — the script itself checks it); `fail` lines → SendMessage
@@ -41,20 +38,21 @@ and stop.
   `ask:` also carries `file: jira-comment.md` (that agent wrote `pr-body.md` too).
 - `error: …` → show it, fix the brief once, re-send.
 
-**Termination:** at most 2 ESCALATE rounds, 1 LOOKUP round, 1 brief fix and 1 check-fix round per
+**Termination:** at most 2 ESCALATE rounds, 1 brief fix and 1 check-fix round per
 drafter. Past any cap, tell the developer what is still open and stop — never loop.
 
 ## Never read the draft
 You never `Read`, `cat`, `head`, `tail`, `sed`, `grep` the text of, open, quote, summarise or
 paraphrase the draft file — not to check it, not to present it, not after an edit. The checkpoint
-shows its absolute path as a clickable link, the `unconfirmed` list and the questions. The only
+shows its absolute path as a clickable link, the `unconfirmed` list, the questions and, on `ac: empty`,
+that the ticket has no AC. The only
 command on the file is `drafter-check.cjs`, which prints counts. base's guard refuses a main-session
 `Read` of a task workspace's `steps-to-test.md`, `pr-body.md` or `jira-comment.md` whenever base runs — on
 any model, `/base-edit-direct` included; only `BASE_GUARD=0` lifts it. That refusal is the rule, not
 an obstacle to route around.
 
 ## Questions and edits
-A developer question about the content ("why step 3?") → SendMessage `mode: ask` + the question
+A developer question about the content ("why item 4?") → SendMessage `mode: ask` + the question
 verbatim. Feedback → SendMessage `mode: revise` + their words verbatim; the drafter re-reads its file,
 rewrites it and returns the same contract. Never edit the file, and never ask the developer to — if
 they did anyway, the drafter's re-read picks it up.

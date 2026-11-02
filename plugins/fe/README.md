@@ -6,7 +6,7 @@ take a ticket from a Technical Approach (TA) to a pull request and a preview the
 
 fe also holds these parts:
 
-- the Steps to Test skill;
+- the Steps to Test skill (setup only: theme, object, setup, edge cases);
 - the breaking-changes and translation tools;
 - the `fe:theme-explorer` scout and the `fe:stt-drafter` / `fe:pr-body-drafter` drafters;
 - the project profile: Foundation, another theme, or none;
@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.13.0**.
+Current release: **fe v0.14.0**.
 
 ## Status
 
@@ -64,7 +64,7 @@ is an offer at the end of the run, never an automatic start. Only `/fe:ship` run
 | `/fe:write-technical-approach` | drafts a Technical Approach from the ticket's Description and Acceptance Criteria, then writes the field after approval | `base:jira-reader`, `base:doc-reader`, `base:jira-writer` → `/fe:develop-feature-or-fix` |
 | `/fe:develop-feature-or-fix` | implements an approved Technical Approach with in-browser validation on the work stream's preview theme | `base:jira-reader`, `base:figma-reader`, `base:doc-reader`, `fe:theme-explorer`, `base:bug-hunter`, `scripts/create-preview-theme.sh` → `/fe:qa-feature-or-fix` |
 | `/fe:qa-feature-or-fix` | structured QA of a finished change against its ticket: checklist, browser checks, pass / fail report | `base:jira-reader`, `base:figma-reader`, `base:jira-writer`, `scripts/create-preview-theme.sh` → `/base:pre-commit-review` (with the profile word) once every blocking check passes |
-| `/fe:write-steps-to-test` | Steps to Test in Domaine's format, written to the field after approval; the series' last step | `base:jira-reader`, `base:doc-reader`, `fe:stt-drafter`, `scripts/drafter-check.cjs`, `base:jira-writer` → `/fe:create-pull-request` when the branch has no PR |
+| `/fe:write-steps-to-test` | Steps to Test in Domaine's format — four items (Theme · Object · Setup · Edge cases / not obvious) that tell QA how to set the change up, never a test script — written to the field after approval; the series' last step | `base:jira-reader`, `base:doc-reader`, `fe:stt-drafter`, `scripts/drafter-check.cjs`, `base:jira-writer` → `/fe:create-pull-request` when the branch has no PR |
 | `/fe:create-pull-request` | a pull request with the Domaine description: a plain-English Summary, the theme-preview table, To check steps and screenshot placeholders | `base:jira-reader`, `base:change-reviewer`, `base:bug-hunter`, `/fe:preview-theme`'s script, `fe:pr-body-drafter`, `scripts/drafter-check.cjs` → `/fe:write-steps-to-test` while the field is empty |
 | `/fe:preview-theme` | creates or refreshes an unpublished preview theme from the branch; in a new worktree, un-pins the copied store config first | `scripts/create-preview-theme.sh`, `scripts/worktree-theme.sh` |
 | `/fe:preflight-checks` | checks the project, the tools and the dev server before work starts | → `/fe:write-technical-approach` or `/fe:develop-feature-or-fix` |
@@ -93,7 +93,7 @@ without it.
 | Agent | Does |
 |---|---|
 | `fe:theme-explorer` | read-only scout of the theme: which files, sections and snippets a change touches; the `profile` comes in its brief |
-| `fe:stt-drafter` | drafts Steps to Test into the workspace `steps-to-test.md` (sonnet); returns ESCALATE / LOOKUP, an answer, or the path + an unconfirmed list, never the text |
+| `fe:stt-drafter` | drafts the four-item Steps to Test into the workspace `steps-to-test.md` from the ticket, the diff and the theme schema, with no store access (sonnet); returns ESCALATE, an answer, or the path + an unconfirmed list, never the text |
 | `fe:pr-body-drafter` | drafts the PR title and body into the workspace `pr-body.md`, and after the PR exists the Jira PR-link comment into `jira-comment.md` (`PR: <url> — <title>`, a short bulleted brief only on request, never a preview link) (haiku); returns ESCALATE, an answer, or the path, title, Summary and an unconfirmed list |
 
 ## References and scripts
@@ -117,7 +117,7 @@ session's `fe plugin root:` line). They cite base's files by their path under ba
 | `references/pipeline-mode.md`, `references/pipeline-phases.md` | `/fe:ship` | the run contract and the phase briefs |
 | `references/eslint-no-restricted-syntax.md` | `/fe:develop-feature-or-fix`, `/fe:fix-accessibility-issue`, `/fe:ship` | Foundation only: state through `data-*` attributes, not `classList` / `style.*` |
 | `references/section-css-variables-pattern.md` | `/fe:develop-feature-or-fix`, `/fe:ship` | Foundation only: a section that drives its blocks' sizes through CSS variables |
-| `references/drafter-loop.md` | `/fe:write-steps-to-test`, `/fe:create-pull-request` | the drafter loop: spawn, receipt check, ESCALATE / LOOKUP relay, SendMessage continuation, ask / revise, caps, the never-read rule, the re-spawn fallback |
+| `references/drafter-loop.md` | `/fe:write-steps-to-test`, `/fe:create-pull-request` | the drafter loop: spawn, receipt check, ESCALATE relay, SendMessage continuation, ask / revise, caps, the never-read rule, the re-spawn fallback |
 
 | Script | Run by | Does |
 |---|---|---|
@@ -128,7 +128,7 @@ session's `fe plugin root:` line). They cite base's files by their path under ba
 | `scripts/shopify-admin-gql.sh` | the skills, through the `store-access` section | one Admin GraphQL call against the project's store |
 | `scripts/project-profile.sh` | fe's hooks module, `worktree-theme.sh`, the doctor, the skills' fallback | prints `foundation`, `theme` or `none` |
 | `scripts/doctor.cjs` | `/fe-doctor`, or by hand | the static install checks (§ Doctor) |
-| `scripts/drafter-check.cjs` | `fe:stt-drafter`, `fe:pr-body-drafter`, `/fe:write-steps-to-test`, `/fe:create-pull-request` | checks a drafter's file (`file stt\|pr\|jira`: structure, the PR core skeleton, the Theme preview table by default — `--no-preview` honored only when the workspace `notes.md` records `preview-decision: no preview`, Summary sentence lengths, the Jira comment's PR line and bulleted brief size with no preview link, theme id or editor URL, no AI attribution) and its reply (`receipt stt\|pr\|jira`: one kind, no empty field) in code, printing counts and `fail` lines only — never the draft |
+| `scripts/drafter-check.cjs` | `fe:stt-drafter`, `fe:pr-body-drafter`, `/fe:write-steps-to-test`, `/fe:create-pull-request` | checks a drafter's file (`file stt\|pr\|jira`: the four Steps to Test items with bullets under items 3 and 4 only, no expected result or catalog handle, at most 160 words, the PR core skeleton, the Theme preview table by default — `--no-preview` honored only when the workspace `notes.md` records `preview-decision: no preview`, Summary sentence lengths, the Jira comment's PR line and bulleted brief size with no preview link, theme id or editor URL, no AI attribution) and its reply (`receipt stt\|pr\|jira`: one kind, no empty field, a LOOKUP refused) in code, printing counts and `fail` lines only — never the draft |
 | `scripts/_shopify-common.sh` | sourced by the store scripts | the shared Shopify CLI and config helpers |
 
 `/fe:fix-breaking-changes` copies its own `skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js`
@@ -185,7 +185,7 @@ depends on the agent type:
   the transcript) get nothing from fe.
 - The read-only agents (`fe:theme-explorer`, `base:change-reviewer`, `base:bug-hunter`, `Explore`,
   `Plan`) get the root, the profile and the Foundation section.
-- The drafters (`fe:stt-drafter`, `fe:pr-body-drafter`) get the root, the profile and store access — they confirm fixture handles on the store — but not the Foundation section: they write prose, not theme code.
+- The drafters (`fe:stt-drafter`, `fe:pr-body-drafter`) get the root and the profile only: they write prose, not theme code, and look nothing up on a store.
 - Every other agent also gets store access when it applies.
 
 **base required:** at a session start fe looks for base's skills in the command list. If they are
@@ -284,7 +284,7 @@ The process environment wins.
 - `tests/team-refs-lint.sh` — every qualified name and cited path resolves, and no legacy plugin name
   is left. The same checker runs for every team plugin on base.
 - `tests/base-qa-stores-sim.sh` — base's QA store registry, `plugins/base/scripts/qa-stores.cjs`, which
-  `/fe:write-steps-to-test` names.
+  `scripts/theme-json.sh locate` reads.
 
 How the pieces fit: [ARCHITECTURE.md](ARCHITECTURE.md).
 

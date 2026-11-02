@@ -297,9 +297,9 @@ there inherits the protocol above.
 
 PR URL · checks/threads state · QA pass/fail table · Jira writes made · preview-theme
 links · the PR's screenshot files as `file://` links to drag into its Screenshots section ·
-judgment-call digest · anything pending (bots) · any screenshot or short video the
-steps-to-test phase asked for by name, verbatim from its report — the plugin uploads nothing,
-so an ask that does not reach the developer here is lost. Set `pipeline.md` →
+judgment-call digest · anything pending (bots) · any setup screenshot the steps-to-test phase
+asked for by name, verbatim from its report, to attach by hand after item 4 with a one-line
+caption — the plugin uploads nothing, so an ask that does not reach the developer here is lost. Set `pipeline.md` →
 `status: done`; every `progress.md` row **this run owns** ticked with dates (rows ship
 never runs — e.g. the pre-existing `write-technical-approach` — stay as they were). Offer workspace cleanup once
 the ticket is Done. Nothing else to offer — the series is complete.

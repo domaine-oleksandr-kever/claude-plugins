@@ -135,29 +135,28 @@ its brief says otherwise.
    PR title (as `gh pr create` got it — jira-hand-off's `pr_title:`), theme id + preview/editor links, the screenshot files the body's placeholder names, ≤10-line report. The conductor verifies the tick
    and the recorded URL before advancing.
 5. **steps-to-test** — agent; fills the bot wait. Write per
-   `<base root>/references/steps-to-test-format.md` and the section files it indexes: **one numbered list** in its
-   General item order — theme · where + the click-level setup recipe · the walk-through, each
-   step carrying its own expectation inline · edge cases · context / out of scope — and no
-   per-AC scenarios and no regression sweep (QA already has the AC; what it lacks is how the
-   change was built). The **Bug** template instead when the workspace `ticket.md` records the
-   Jira issue type as `Bug`.
-   Sources: the AC + the branch diff — every section, block, setting, metafield and metaobject
-   the change **adds or reconfigures** is a setup recipe the QA engineer follows themselves (editor
-   route, each label verbatim with its value, the content to add, **Save**: a deploy carries
-   code, not template JSON, so a new section arrives empty and building it is part of the test)
-   — + `qa.md` + `notes.md` repro values (catalog handles as `e.g.` examples with the properties
-   a stand-in must share — the QA store may not carry them) + the `notes.md` judgment calls and
-   `ceiling:` entries, which are the material for the context / out-of-scope item.
+   `<base root>/references/steps-to-test-format.md` and the section files it indexes: **one numbered list
+   of four items** — Theme · Object · Setup · Edge cases / not obvious — for a feature and a bug alike.
+   It tells QA how to set the change up; QA tests it against the AC, so no walk-through, no expected
+   results and nothing restated from the Description or AC.
+   Sources: the AC + the branch diff — every section, block, setting, metafield and metaobject the
+   change **adds or reconfigures** is item 3 setup the QA engineer does themselves (editor route, each
+   label verbatim with its value, **Save**: a deploy carries code, not template JSON, so a new section
+   arrives empty) — + `notes.md` repro values turned into **properties** (never a catalog handle: QA
+   builds the data) + the `notes.md` judgment calls and `ceiling:` entries, the material for item 4.
+   A Bug's item 3 is the state that makes the defect reachable; the root cause stays in the PR.
    **Theme (item 1):** the QA theme facts this run already recorded in `notes.md` (an interview
    answer, a QA theme the ticket names) → otherwise the reference's Theme-resolution order **without its
    ask-the-developer rung** (a phase agent asks nobody): the ticket, else a theme this run already
    confirmed on that store, else the reference's unconfirmed `confirm with the TL` placeholder;
    **never the workspace `session-theme: <id>`** — that is the PR's own preview theme, which may
    be deleted by the time QA looks, so it is never named in the field. No such fact anywhere →
-   the placeholder; this phase does not spend an ESCALATE on it. A location or setup step that text
-   alone cannot make obvious → say so in the phase report, so the developer attaches a screenshot or
-   short video by hand (the plugin uploads nothing); never a line addressed to the developer inside the field.
-   Save `steps-to-test.md`; policy allows → write the field via
+   the placeholder; this phase does not spend an ESCALATE on it. A route or setting that text alone
+   cannot make obvious → name it in the phase report, so the developer attaches a setup screenshot by
+   hand after item 4 with a one-line caption (the plugin uploads nothing; result screenshots stay in
+   the PR); never a line addressed to the developer inside the field.
+   Save `steps-to-test.md` and run `node <fe root>/scripts/drafter-check.cjs file stt <path>` until
+   it prints `result=ok`; policy allows → write the field via
    `node "<base root>/scripts/md-to-adf.cjs" --no-tables` + `editJiraIssue` on the
    workspace `ticket.md` key (`<base root>/references/jira-adf-write.md`).
 6. **aftercare** — `gh pr checks --watch`; a failing check → diagnose → fix agent → refresh

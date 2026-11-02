@@ -9,8 +9,8 @@ Read by `/fe:develop-feature-or-fix` Phase 2 (implement + in-browser validation)
   declaration ship together: a theme setting (`settings.*`) → `config/settings_schema.json`; a
   section setting → that section's `{% schema %}`.
 - A new section or block needs `presets` to appear in the editor. Wire it on the session theme
-  via `<fe root>/scripts/theme-json.sh set` and let Steps to Test carry the setup recipe — a
-  deploy carries code, not template JSON.
+  via `<fe root>/scripts/theme-json.sh set` and let Steps to Test item 3 (Setup) carry the
+  recipe — a deploy carries code, not template JSON.
 - Alternate templates are reached with `?view=<name>` (`templates/<type>.<name>.json`). One made
   for a test needs manual cleanup: `theme-json.sh` has no delete.
 

@@ -68,9 +68,10 @@ A conditional section below uses the same form: `## Dependencies`, `## Accessibi
    cases, no Expected/Actual format. Which store to use, which setting is on in this preview,
    how to see the old behaviour → a step. A bug takes 1–3 steps ("open the PDP, scroll to Scent
    Notes, heading is 24/32"); a feature may pass 5 but stays short, ~10 at most — beyond that,
-   link the ticket's Steps to Test field instead of growing the list. The steps come from the
-   workspace verification record (`notes.md` / `qa.md`); the full Steps to Test, setup and edge
-   cases stay in Jira.
+   keep the main states and leave the rest to the AC. The steps come from the workspace
+   verification record (`notes.md` / `qa.md`); the setup (the ticket's Steps to Test) and the AC
+   stay in Jira. To check and Screenshots carry the expected results: the Steps to Test field
+   holds none.
 5. **Screenshots** — 1–3 images, never more: a bug = one of the
    affected section; a feature = desktop + mobile of the main state. Pick them from the browser
    checks already taken (`/fe:develop-feature-or-fix` in-browser validation,

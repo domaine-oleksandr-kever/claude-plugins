@@ -2,7 +2,9 @@
 // drafter-check.cjs — checks a drafter's file and its receipt in code, so the main session never
 // reads the draft. Prints counts and `ok`/`fail` lines only, never the checked text.
 //
-//   drafter-check.cjs file stt <path>            steps-to-test.md: structure, attribution
+//   drafter-check.cjs file stt <path>            steps-to-test.md: the four items as one list; no expectation,
+//                                                old-format text or handle; words (fail over 160,
+//                                                warn=over-120-target above 120), attribution
 //   drafter-check.cjs file pr <path> [--no-preview]  pr-body.md: core skeleton, theme preview table
 //                                                (off with --no-preview when the notes.md beside it
 //                                                records 'preview-decision: no preview'), None/N/A,
@@ -22,6 +24,7 @@ const USAGE = `usage: drafter-check.cjs file stt <path>
 The pr check requires the Theme preview table; --no-preview turns that off only when the notes.md
 beside the checked file holds a 'preview-decision: no preview' line (the developer's recorded
 answer) — else the table is still required. Prints no_preview=recorded|unrecorded|off.
+The stt check fails over 160 words and prints warn=over-120-target from 121 to 160 (still ok).
 Prints result=ok|fail, counts and one 'fail <check>' line per defect — never the checked text.
 Exit 0 ok, 1 fail, 2 usage.`;
 
@@ -43,35 +46,69 @@ function readFile(path, fails) {
   return text;
 }
 
-/** Steps to Test: the structural rules of base references/steps-to-test/{templates,self-check}.md a script can see. */
+// base references/steps-to-test/templates.md: the four items, in order
+const STT_ITEMS = [['Theme', /^1\. \*\*Theme:\*\*/], ['Object', /^2\. \*\*Object:\*\*/], ['Setup', /^3\. \*\*Setup:\*\*/],
+  ['Edge cases / not obvious', /^4\. \*\*Edge cases \/ not obvious:\*\*/]];
+const STT_TARGET_WORDS = 120;
+const STT_MAX_WORDS = 160;
+const EXPECTATION = /\bshould (?:now )?(?:see|show|display|appear)\b|\byou(?:'ll| will) see\b|\bexpected(?: results?)?\s*:|\bexpected results?\b|\bresult\s*:|\bverify\b|\bconfirm that\b/i;
+const OLD_FORMAT = /handles are examples|why the bug happened|what was changed|what to expect|context \/ out of scope|\bregression:|\balready (?:set up|configured)\b/i;
+// a catalog handle: a concrete /products|collections|pages|blogs/<handle> path, `e.g.` followed by a path,
+// or `e.g.` followed by a kebab-case word in backticks; the bare `/collections/…` placeholder is no handle
+const HANDLE = /\/(?:products|collections|pages|blogs)\/[A-Za-z0-9]|\be\.g\.,?\s*[`'"(]?\/|\be\.g\.,?\s*`[a-z0-9]+(?:-[a-z0-9]+)+`/i;
+
+/** Words a reader reads: list markers and tokens with no letter or digit (`>`, `—`) are not words. */
+const wordCount = (lines) => lines
+  .map((l) => l.replace(/^\s*(?:\d+\.|[-*+])\s+/, ''))
+  .join(' ').split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+
+/** Steps to Test: the structural rules of base references/steps-to-test/{templates,shape-and-size,self-check}.md a script can see. */
 function checkStt(path) {
   const fails = [];
   const text = readFile(path, fails);
   if (text === null) return report(['kind=stt'], fails);
   const lines = text.split('\n');
   const first = lines.find((l) => l.trim()) || '';
-  // templates.md: both templates open with `1. **Theme:**`
-  if (!/^1\. \*\*Theme:\*\*/.test(first)) fails.push('item 1 is not the **Theme:** line');
-  // templates.md: the Bug template's items 2–4, the General template's Where / Edge cases
-  const bug = /\*\*Why the bug happened:\*\*/.test(text);
-  const need = bug
-    ? [/^2\. \*\*Why the bug happened:\*\*/m, /^3\. \*\*What was changed to fix it:\*\*/m, /^4\. \*\*What to expect:\*\*/m]
-    : [/^2\. \*\*Where:\*\*/m, /^\d+\. \*\*Edge cases:\*\*/m];
-  const names = bug ? ['Why the bug happened', 'What was changed to fix it', 'What to expect'] : ['Where', 'Edge cases'];
-  need.forEach((re, i) => { if (!re.test(text)) fails.push(`item missing: ${names[i]}`); });
-  // self-check.md: one ordered list numbered through; no headings, tables or ✅ markers
+  if (!STT_ITEMS[0][1].test(first)) fails.push('item 1 is not the **Theme:** line');
+  STT_ITEMS.slice(1).forEach(([name, re]) => { if (!lines.some((l) => re.test(l))) fails.push(`item missing: ${name}`); });
   const nums = lines.map((l) => (/^(\d+)\. /.exec(l) || [])[1]).filter(Boolean).map(Number);
-  // item-rules.md n+2: Context / out of scope is optional, and the last item when present
-  const numbered = lines.filter((l) => /^\d+\. /.test(l));
-  const ctx = numbered.findIndex((l) => /^\d+\. \*\*Context \/ out of scope:\*\*/.test(l));
-  if (!bug && ctx >= 0 && ctx !== numbered.length - 1) fails.push('Context / out of scope is not the last item');
   if (nums.some((n, i) => n !== i + 1)) fails.push('items not numbered through from 1');
+  if (nums.length !== STT_ITEMS.length) fails.push(`not ${STT_ITEMS.length} items (${nums.length})`);
+  let item = 0;
+  const nested = new Set();
+  const indents = [];
+  let stray = false;
+  let subList = false;
+  for (const l of lines) {
+    const top = /^(\d+)\. /.exec(l);
+    if (top) { item = Number(top[1]); continue; }
+    const bullet = /^(\s+)(?:[-*+]|\d+\.) /.exec(l);
+    if (bullet) {
+      if (item !== 3 && item !== 4) nested.add(item);
+      indents.push(bullet[1].length);
+      if (/^\s+\d+\. /.test(l)) subList = true;
+    } else if (l.trim()) {
+      stray = true;
+    }
+  }
+  nested.forEach((n) => fails.push(n ? `nested bullet under item ${n} (only under items 3 and 4)` : 'nested bullet before item 1'));
+  if (indents.length && Math.max(...indents) > Math.min(...indents)) fails.push('bullet nested more than one level');
+  if (subList) fails.push('numbered sub-list in the field (a walk-through; setup bullets are `-`)');
+  if (stray) fails.push('line outside the list (a wrapped line, a column-0 bullet, an image or a block): one physical line per item and per indented bullet');
   if (lines.some((l) => /^#{1,6} /.test(l))) fails.push('heading in the field');
   if (lines.some((l) => /^\s*\|.*\|\s*$/.test(l))) fails.push('table in the field');
   if (text.includes('✅')) fails.push('✅ marker in the field');
+  if (/<\/?(?:details|summary)\b/i.test(text)) fails.push('accordion in the field (<details> / <summary>)');
+  if (/!\[[^\]]*\]\(/.test(text)) fails.push('image in the field (the developer attaches setup screenshots after item 4 by hand)');
+  if (lines.some((l) => EXPECTATION.test(l))) fails.push('expected result in the field ("should see", "Expected:", "verify")');
+  if (lines.some((l) => OLD_FORMAT.test(l))) fails.push('old-format text in the field (handle substitution, Bug-template label, context item, "already set up")');
+  if (lines.some((l) => HANDLE.test(l))) fails.push('catalog handle in the field (data as properties, never a handle)');
+  const words = wordCount(lines);
+  if (words > STT_MAX_WORDS) fails.push(`over ${STT_MAX_WORDS} words (${words})`);
   const hits = attributionHits(text);
   if (hits) fails.push('AI attribution');
-  return report(['kind=stt', `template=${bug ? 'bug' : 'general'}`, `items=${nums.length}`, `attribution_hits=${hits}`], fails);
+  const warn = words > STT_TARGET_WORDS && words <= STT_MAX_WORDS ? ['warn=over-120-target'] : [];
+  return report(['kind=stt', `items=${nums.length}`, `words=${words}`, `attribution_hits=${hits}`, ...warn], fails);
 }
 
 // fe create-pull-request reference/body-sections.md: the core skeleton, in order. The docs ask for a
@@ -219,12 +256,12 @@ function field(lines, key) {
 function checkReceipt(kind, text) {
   const fails = [];
   const lines = text.split('\n');
+  if (lines.some((l) => /^LOOKUP\s*$/.test(l))) return report(['kind=lookup'], ['LOOKUP is not a receipt kind any more']);
   const kinds = [];
   if (lines.some((l) => /^ESCALATE\s*$/.test(l))) kinds.push('escalate');
-  if (lines.some((l) => /^LOOKUP\s*$/.test(l))) kinds.push('lookup');
   for (const k of ['answer', 'written', 'error']) if (lines.some((l) => new RegExp(`^${k}:`).test(l))) kinds.push(k);
   if (kinds.length !== 1) {
-    fails.push(kinds.length ? `several kinds in one reply (${kinds.join(', ')})` : 'no kind (ESCALATE, LOOKUP, answer:, written:, error:)');
+    fails.push(kinds.length ? `several kinds in one reply (${kinds.join(', ')})` : 'no kind (ESCALATE, answer:, written:, error:)');
     return report([`kind=${kinds.join('+') || 'none'}`], fails);
   }
   const k = kinds[0];
@@ -238,13 +275,6 @@ function checkReceipt(kind, text) {
       for (const f of ['question', 'context', 'options']) if (!it[f]) fails.push(`item ${i + 1} ${f} empty`);
       if (it.options) { const o = Array.isArray(it.options) ? it.options : splitOptions(it.options); if (!o || o.length < 2) fails.push(`item ${i + 1} options fewer than 2`); }
     });
-  } else if (k === 'lookup') {
-    if (kind !== 'stt') fails.push('LOOKUP is the stt drafter\'s only');
-    const list = items(lines, 'store');
-    out.push(`items=${list.length}`);
-    if (!list.length) fails.push('LOOKUP with no item');
-    if (list.length > 8) fails.push('more than 8 lookups');
-    list.forEach((it, i) => { for (const f of ['store', 'need']) if (!it[f]) fails.push(`item ${i + 1} ${f} empty`); });
   } else if (k === 'written') {
     const p = field(lines, 'written') || '';
     const want = { stt: '/steps-to-test.md', pr: '/pr-body.md', jira: '/jira-comment.md' }[kind];

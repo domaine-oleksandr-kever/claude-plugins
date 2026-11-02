@@ -6637,7 +6637,7 @@ FW="$DH/fe-cfg-work"; mkdir -p "$FW"; printf '{"oauthAccount":{"organizationType
 assert_eq DHfe5-work "$(DH_ENV="CLAUDE_CONFIG_DIR=$FW" fe_lbl)" "work|claude_team|$FW/.claude.json"
 
 # DHfe6: the subagent share — base's readers and writer, Claude Code's helpers and a fork get nothing; a read-only
-# agent root, profile and Foundation rules; a code agent also store access; the profile comes from the start
+# agent root, profile and Foundation rules; a code agent also store access; a drafter root and profile only; the profile comes from the start
 # marker, the probe runs only without one; no marker of its own.
 dh_home fe-sub; fe_files .env; SM="$(FLOG f-sub)"; mkdir -p "$SM"
 printf '{"via":"hook","profile":{"word":"foundation","via":"project-profile.sh","why":null,"toml":false,"store":true}}\n' > "$SM/conventions.fe.json"
@@ -6655,7 +6655,7 @@ for a in general-purpose some-plugin:implementer ""; do
   assert_eq "DHfe6-code-${a:-empty}" "$(fe_sub "$a")" "$RO## fe capability — live store access|"
 done
 for a in fe:stt-drafter fe:pr-body-drafter; do
-  assert_eq "DHfe6-drafter-$a" "$(fe_sub "$a")" "$(printf '%s' "$ROOT_LINE" | sed "s|$FR|<FR>|")|fe project profile: foundation|## fe capability — live store access|"
+  assert_eq "DHfe6-drafter-$a" "$(fe_sub "$a")" "$(printf '%s' "$ROOT_LINE" | sed "s|$FR|<FR>|")|fe project profile: foundation|"
 done
 if [ -e "$PLOG" ]; then bad DHfe6-marker-no-probe "the probe ran though the start marker holds the profile"; else ok; fi
 assert_eq DHfe6-event "$(fe_sub Plan >/dev/null; dh_evt)" "SubagentStart"

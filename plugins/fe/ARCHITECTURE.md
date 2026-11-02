@@ -16,7 +16,7 @@ plugins/fe/
 ├── skills/<name>/SKILL.md       the 12 Shopify theme skills (`/fe:<name>`); fix-breaking-changes
 │                                carries its script template, create-pull-request its REFERENCE.md
 ├── agents/theme-explorer.md     the read-only theme scout (`fe:theme-explorer`)
-├── agents/stt-drafter.md        drafts Steps to Test into the workspace (`fe:stt-drafter`, sonnet)
+├── agents/stt-drafter.md        drafts the four-item Steps to Test into the workspace (`fe:stt-drafter`, sonnet)
 ├── agents/pr-body-drafter.md    drafts the PR title, body and Jira PR-link comment into the workspace (`fe:pr-body-drafter`, haiku)
 ├── references/*.md              what fe's skills and agents read on demand (`<fe root>/references/…`);
 │                                drafter-loop.md is the one home of the drafter loop
@@ -51,8 +51,8 @@ writes `<log dir>/<session-id>/conventions.fe.json` (the profile included); `sub
 prints the share for the agent type on stdin, the profile from that marker. On a toml checkout `start` also
 prints the `fe preview default:` line: `previewDefault()` reads `FE_PREVIEW_DEFAULT` from the environment,
 else `~/.config/domaine/env` (never the committable project `.claude/domaine.env`), and `scripts/doctor.cjs`
-asks the same function for its `preview` row. A drafter (`*-drafter`) gets the root, the profile and store
-access, never the Foundation section. It always exits 0 and prints
+asks the same function for its `preview` row. A drafter (`*-drafter`) gets the root and the profile only —
+no store access, no Foundation section. It always exits 0 and prints
 nothing on an internal error; the only stderr line is a marker write that failed. It requires nothing
 from base: the helpers (stdin, envelope, log dir, login label) are copies of base's.
 

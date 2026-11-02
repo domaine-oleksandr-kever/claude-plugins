@@ -23,7 +23,7 @@ const WORDS = ['foundation', 'theme', 'none'];
 const NO_FE_AGENT = /(^|:)(jira-reader|jira-writer|figma-reader|doc-reader)$|^(claude-code-guide|statusline-setup)$/;
 /** Agents that read the theme without writing it: the root, the profile and the Foundation rules, no store access. */
 const READ_ONLY_AGENT = /(^|:)(theme-explorer|change-reviewer|bug-hunter)$|^(Explore|Plan)$/;
-/** Agents that write prose, not theme code: the root, the profile and store access, no Foundation rules. */
+/** Agents that write prose, not theme code: the root and the profile only. */
 const DRAFTER_AGENT = /-drafter$/;
 
 function readStdin() {
@@ -149,12 +149,12 @@ function startText(p) {
   return { sections: parts.map(([n]) => n), text: parts.map(([, t]) => t).join('\n\n') };
 }
 
-/** A subagent's share: '' for a fork and base's readers; root, profile and Foundation rules (not for a drafter); store access unless read-only. */
+/** A subagent's share: '' for a fork and base's readers; else root and profile, plus Foundation rules unless a drafter and store access unless a drafter or read-only. */
 function subagentText(agentType, p) {
   if (agentType === 'fork' || NO_FE_AGENT.test(agentType)) return '';
   const parts = [rootLine(), profileLine(p.word)];
   if (p.word === 'foundation' && !DRAFTER_AGENT.test(agentType)) parts.push(T['comment-discipline-foundation']);
-  if (p.store && !READ_ONLY_AGENT.test(agentType)) parts.push(storeAccess());
+  if (p.store && !READ_ONLY_AGENT.test(agentType) && !DRAFTER_AGENT.test(agentType)) parts.push(storeAccess());
   return parts.join('\n\n');
 }
 
