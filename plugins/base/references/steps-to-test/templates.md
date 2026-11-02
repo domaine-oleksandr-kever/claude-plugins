@@ -1,45 +1,25 @@
-# Steps to Test — Templates
+# Steps to Test — Template
 
 One section of the Steps to Test format; the index is `../steps-to-test-format.md`.
 
-**General (feature / improvement)** — Theme, Where + setup, the walk-through with the guide's item 4 folded
-into each step, Edge cases, Context / out of scope. `n+1` / `n+2` denote the last two numbers of the run; the
-output carries the real digits (`8.`, `9.`).
+One skeleton, feature and bug alike. Four items, numbered 1–4, in this order; nested bullets one level
+deep under items 3 and 4 only.
 
 ```markdown
-1. **Theme:** <store + theme, label + id>; <preview link or **Preview** route>. <Market / viewport if it matters, + how to set it.>
-
-2. **Where:** page `<path>` (admin: <exact route, labels verbatim>). The section is **<name as the admin sees it>**.
-   - <ships on `<template>` — find it in the sidebar, don't **Add section**; if it is missing, set it up as:>
-   - <Customize route, or one editor deep link> > **Add section** > **<Section name>** (drag <position>);
-   - **<Setting label>** → `<value>`; **Add block** > **<Block name>** > **<Setting>** → **<option>**;
-   - add <content: product / image / copy>, then **Save**. <Theme code updated again → redo this setup.>
-   - data you need, in <admin path>: <role> — `e.g. <handle>` + <properties> <(store-wide) (restore: <how>)>.
-
-3. On `<path>`, <action>. You should see <exact outcome — copy verbatim, values, counts>.
-4. <Next action, location first.> <Expectation clause.>
-
-n+1. **Edge cases:**
-   - <blank / overflow / boundary on a new setting> → <expected behaviour>;
-   - <platform limitation> → <what happens; not a bug>.
-
-n+2. **Context / out of scope:**
-   - <new setting + its default, where the value comes from>;
-   - <what was left unchanged, or a known limit, stated as not a bug>;
-   - <not in this ticket: <area> — <one clause why>>.
+1. **Theme:** <environment: DEV / UAT / Prod> — <store>, theme **<name>** (<id>); <preview link or `Online Store > Themes > <name> > Preview`>. <Market / viewport / locale only when the change depends on it, with the breakpoint in px.>
+2. **Object:** <page by path, template name, section / block by its admin name, `Theme settings > <group>` — where the change lives>.
+3. **Setup:** <what QA has to configure to reach the change, in dependency order — store data → definitions → entries → theme settings → content>
+   - <settings by label with their value (a theme-settings group's values too), `Add section` / `Add block` by editor name, then **Save**>;
+   - <data QA needs, as properties: "a product with 3+ sizes where 1 size is sold out">;
+   - <store-wide mutation → its restore in the same bullet>.
+4. **Edge cases / not obvious:** <boundaries, blank values, platform limits stated as not a bug, states only time reaches, what is intentionally out of this ticket — one clause each>.
 ```
 
-**Bug (defect fix)** — the guide's four items; no scenarios, no regression sweep. The location, the setup
-recipe and the expectations all live in item 4: a lead line naming the trigger fixture, then **one nested
-bullet per case** — never one paragraph that runs the cases together.
+Item 3 is the heart of the field: everything the change adds or re-wires has its route and its non-default
+settings there. Item 4 may be a single clause when there is nothing non-obvious; it is never a test scenario.
 
-```markdown
-1. **Theme:** <as above — store, theme, how to open it>.
-2. **Why the bug happened:** <root cause in terms the tester can observe, 1–2 sentences>.
-3. **What was changed to fix it:** <the change in plain terms, new limits / values; a setting by its verbatim editor label>.
-4. **What to expect:** on the <role> product, e.g. `<path>` (<the counts / values that made it trigger>) (admin: <editor route>). Handles are examples — if one is missing on your store, use any product with the same properties and say which one you used. <Touches a setting or needs data → item 2's recipe.>
-   - **<Case that used to break — viewport with its breakpoint / page / data state>:** <action, location first>. You should see <what it does now — exact values>;
-   - **<Next surface or viewport the fix reaches>:** <action>. <Expectation clause>;
-   - **<Boundary — second `e.g.` handle with its properties, or the setting blank / past its limit>:** <action>. <Expectation> (restore: <how>);
-   - **Regression:** <what a failure looks like — one clause per sign>.
-```
+**A Bug** uses the same four items. Item 3 holds the state that makes the defect reachable — the data
+shape, viewport, market, setting value — and the state the fix keeps or limits, as requirements, never a
+handle or a page that already shows it. A storefront choice that conditions the defect (a filter selected, a
+search typed) is an item 4 fact, not a setup bullet.
+The root cause and the fix are never in the field: they are in the PR.

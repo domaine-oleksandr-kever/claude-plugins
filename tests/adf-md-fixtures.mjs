@@ -1122,87 +1122,81 @@ for (const [label, adf] of ADF_CORPUS) {
   check(`prop-adf-identity[${label}]`, sortMarks(m2a(a2m(adf))), sortMarks(adf));
 }
 
-// ---------------------- Steps to Test: the General template through the Jira write path --
+// ---------------------- Steps to Test: the four-item skeleton through the Jira write path --
 
 // The field is written with `md-to-adf --no-tables`, so the whole document has to survive as ONE
-// ordered list: numbered items carrying bold labels and inline code, and nested bullets under items 2,
-// 5 and 6 (General) or item 4 (Bug) — one level deep, the only depth `references/steps-to-test-format.md`
-// allows in the field. A split list or a lost bullet reaches Jira as prose detached from its item.
-const STT_GENERAL_MD = [
-  '1. **Theme:** the QA theme the TL deploys to (id `100000000001` — confirm with the TL). Preview: `/?preview_theme_id=100000000001`.',
-  '2. **Where:** page `/pages/sample` (admin: Online Store > Pages > **Sample**). The section is **Sample block** — set it up:',
-  '  - Online Store > Themes > **QA** > **Customize** > **Page** > **Add section** > **Sample block**;',
-  '  - **Heading** → `Sample heading`; **Add block** > **Item**, then **Save**;',
-  '  - data you need, created in Settings > Custom data: metafield **Sample** · `custom.sample` · single line text; a product with it set: e.g. `/products/sample-item`.',
-  '3. On `/pages/sample`, load the page. You should see **Sample block** with `Sample heading`.',
-  "4. Click **Show more**. The panel lists every item in the admin's order.",
-  '5. **Edge cases:**',
-  '  - **Heading** blank → the section renders without a heading;',
-  '  - a product without `custom.sample` → that item is skipped.',
-  '6. **Context / out of scope:**',
-  '  - **Heading** defaults to `Sample heading`, from the section setting;',
-  '  - not in this ticket: the metafield definition — it ships with the store.',
+// ordered list of four items carrying bold labels and inline code, with nested bullets under items 3
+// and 4 only — one level deep, the only depth `references/steps-to-test-format.md` allows in the field.
+// A split list or a lost bullet reaches Jira as prose detached from its item.
+const STT_FEATURE_MD = [
+  '1. **Theme:** DEV — sample store, theme **QA** (`100000000001`); preview: `/?preview_theme_id=100000000001`.',
+  '2. **Object:** page `/pages/sample` — the **Sample block** section; the cart drawer **Delivery** row.',
+  '3. **Setup:**',
+  '  - Online Store > Themes > **QA** > **Customize** > **Page** > **Add section** > **Sample block**, **Heading** → `Sample heading`, then **Save**;',
+  '  - metafield definition: product · **Sample** · single line text (`Settings > Custom data > Products > Add definition`);',
+  '  - a product with **Sample** set and 3+ sizes, one sold out (store-wide; restore: clear **Sample**).',
+  '4. **Edge cases / not obvious:**',
+  '  - **Heading** blank: no heading, by design;',
+  '  - comma decimals (`2,95`) are not supported.',
 ].join('\n');
 {
-  const adf = m2a(STT_GENERAL_MD, ['--no-tables']);
-  check('stt-general-one-ordered-list', adf.content.map((b) => b.type), ['orderedList']);
+  const adf = m2a(STT_FEATURE_MD, ['--no-tables']);
+  check('stt-feature-one-ordered-list', adf.content.map((b) => b.type), ['orderedList']);
   const items = adf.content[0].content;
-  check('stt-general-item-count', items.length, 6);
-  // item 2: the bold label and the inline path on the item's own line, the recipe nested under it
-  check('stt-general-item2-children', items[1].content.map((b) => b.type), ['paragraph', 'bulletList']);
-  check('stt-general-item2-label-and-code', items[1].content[0].content.slice(0, 3),
-    [t('Where:', [mStrong]), t(' page '), t('/pages/sample', [mCode])]);
-  check('stt-general-item2-bullets', items[1].content[1].content.length, 3);
-  // the data bullet: the whole dependency chain on ONE bullet, its marks intact, no second level
-  const dataBullet = items[1].content[1].content[2];
-  check('stt-general-data-bullet-flat', dataBullet.content.map((b) => b.type), ['paragraph']);
-  check('stt-general-data-bullet-marks', dataBullet.content[0].content,
-    [t('data you need, created in Settings > Custom data: metafield '), t('Sample', [mStrong]), t(' · '),
-      t('custom.sample', [mCode]), t(' · single line text; a product with it set: e.g. '),
-      t('/products/sample-item', [mCode]), t('.')]);
-  for (const [label, idx] of [['edge-cases', 4], ['context', 5]]) {
-    check(`stt-general-nested-bullets-${label}`, items[idx].content.map((b) => b.type),
-      ['paragraph', 'bulletList']);
-  }
+  check('stt-feature-item-count', items.length, 4);
+  // item 2: the bold label and the inline path on the item's own line, no nested list
+  check('stt-feature-item2-children', items[1].content.map((b) => b.type), ['paragraph']);
+  check('stt-feature-item2-label-and-code', items[1].content[0].content.slice(0, 3),
+    [t('Object:', [mStrong]), t(' page '), t('/pages/sample', [mCode])]);
+  // item 3: a label-only lead line, the setup nested under it
+  check('stt-feature-item3-children', items[2].content.map((b) => b.type), ['paragraph', 'bulletList']);
+  check('stt-feature-item3-lead', items[2].content[0].content, [t('Setup:', [mStrong])]);
+  check('stt-feature-item3-bullets', items[2].content[1].content.length, 3);
+  // the definition bullet: owner · name · type and its route on ONE bullet, marks intact, no second level
+  const defBullet = items[2].content[1].content[1];
+  check('stt-feature-def-bullet-flat', defBullet.content.map((b) => b.type), ['paragraph']);
+  check('stt-feature-def-bullet-marks', defBullet.content[0].content,
+    [t('metafield definition: product · '), t('Sample', [mStrong]), t(' · single line text ('),
+      t('Settings > Custom data > Products > Add definition', [mCode]), t(');')]);
+  check('stt-feature-item4-children', items[3].content.map((b) => b.type), ['paragraph', 'bulletList']);
+  check('stt-feature-item4-bullets', items[3].content[1].content.length, 2);
   // the whole document comes back byte-identical, the stored ADF is a fixpoint, and no delimiter
   // survives as literal text in the field
   const md1 = noEOL(a2m(adf));
-  check('stt-general-roundtrip-canonical', md1, STT_GENERAL_MD);
-  check('stt-general-adf-stable', m2a(md1, ['--no-tables']), adf);
-  check('stt-general-no-leak', leakedText(adf), []);
+  check('stt-feature-roundtrip-canonical', md1, STT_FEATURE_MD);
+  check('stt-feature-adf-stable', m2a(md1, ['--no-tables']), adf);
+  check('stt-feature-no-leak', leakedText(adf), []);
 }
 
-// Bug template: item 4 is a lead line (fixture + substitution rule) and one bold-labelled bullet per
-// case. Each case must reach Jira as its own bullet under item 4 — the cases run together in one
-// paragraph is exactly the shape the format forbids.
+// Bug shape: the same four items; item 3 is one bold-labelled bullet per requirement that makes the
+// defect reachable, and item 4 is a single line of clauses. Each requirement must reach Jira as its own
+// bullet under item 3, and a single-line item 4 must stay one paragraph with no empty list under it.
 const STT_BUG_MD = [
-  '1. **Theme:** the QA theme the TL deploys to (id `100000000001` — confirm with the TL). Preview: `/?preview_theme_id=100000000001`. Check both a mobile viewport (under 1024px) and desktop (1024px and up).',
-  '2. **Why the bug happened:** the **Sample banner** read **Mobile layout** from the entry and defaulted to Overlay.',
-  '3. **What was changed to fix it:** on mobile the section always stacks the image above the copy; desktop is unchanged.',
-  '4. **What to expect:** on a product with a filled banner, e.g. `/products/sample-item` (both images set). Handles are examples — if one is missing on your store, use any product with the same properties and say which one you used.',
-  '  - **Mobile (under 1024px):** open the PDP. You should see the image above the heading, no scrim;',
-  '  - **Desktop (1024px and up):** open the PDP. The image sits behind the copy; **Show overlay** True → a dark scrim;',
-  '  - **No background image:** clear both images and **Save** — both viewports show just the copy (restore: set both images back and **Save**);',
-  '  - **Regression:** copy over the image on mobile, or a scrim on mobile.',
+  '1. **Theme:** UAT — sample store, theme **QA** (`100000000001`); preview: `/?preview_theme_id=100000000001`. Viewport under 1024px.',
+  '2. **Object:** product cards in the **Collection grid** (`/collections/…`) and the **Search grid** (`/search?q=…`).',
+  '3. **Setup:**',
+  '  - **Banner:** an entry with **Mobile layout** → **Stacked** and both images set, then **Save**;',
+  '  - **Product:** 3+ sizes, one Unlisted but published to the Online Store;',
+  '  - **Collection:** its enforced-filter metafield holds a size (store-wide; restore: clear it).',
+  '4. **Edge cases / not obvious:** the sidebar **Size** filter trimming chips is intended; product-level filters do not trim.',
 ].join('\n');
 {
   const adf = m2a(STT_BUG_MD, ['--no-tables']);
   check('stt-bug-one-ordered-list', adf.content.map((b) => b.type), ['orderedList']);
   const items = adf.content[0].content;
   check('stt-bug-item-count', items.length, 4);
-  // item 4: the lead line as its own paragraph, the four cases as four bullets under it
-  check('stt-bug-item4-children', items[3].content.map((b) => b.type), ['paragraph', 'bulletList']);
+  check('stt-bug-item3-children', items[2].content.map((b) => b.type), ['paragraph', 'bulletList']);
+  check('stt-bug-item3-bullets', items[2].content[1].content.length, 3);
+  // every requirement bullet opens with its bold label, and no bullet nests a second level
+  check('stt-bug-item3-labels',
+    items[2].content[1].content.map((li) => li.content[0].content[0]),
+    [t('Banner:', [mStrong]), t('Product:', [mStrong]), t('Collection:', [mStrong])]);
+  check('stt-bug-item3-bullets-flat',
+    items[2].content[1].content.map((li) => li.content.map((b) => b.type)),
+    [['paragraph'], ['paragraph'], ['paragraph']]);
+  check('stt-bug-item4-single-line', items[3].content.map((b) => b.type), ['paragraph']);
   check('stt-bug-item4-label', items[3].content[0].content.slice(0, 2),
-    [t('What to expect:', [mStrong]), t(' on a product with a filled banner, e.g. ')]);
-  check('stt-bug-item4-bullets', items[3].content[1].content.length, 4);
-  // every case bullet opens with its bold label, and no bullet nests a second level
-  check('stt-bug-item4-case-labels',
-    items[3].content[1].content.map((li) => li.content[0].content[0]),
-    [t('Mobile (under 1024px):', [mStrong]), t('Desktop (1024px and up):', [mStrong]),
-      t('No background image:', [mStrong]), t('Regression:', [mStrong])]);
-  check('stt-bug-item4-bullets-flat',
-    items[3].content[1].content.map((li) => li.content.map((b) => b.type)),
-    [['paragraph'], ['paragraph'], ['paragraph'], ['paragraph']]);
+    [t('Edge cases / not obvious:', [mStrong]), t(' the sidebar ')]);
   const md1 = noEOL(a2m(adf));
   check('stt-bug-roundtrip-canonical', md1, STT_BUG_MD);
   check('stt-bug-adf-stable', m2a(md1, ['--no-tables']), adf);

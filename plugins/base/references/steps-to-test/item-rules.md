@@ -2,91 +2,85 @@
 
 One section of the Steps to Test format; the index is `../steps-to-test-format.md`.
 
-**1. Theme.** Store + theme, label + id (order: `theme-resolution.md`), and the route that opens it, since
-every later path resolves against it: confirmed id, no editor work → the preview link
-`https://<store>.myshopify.com/?preview_theme_id=<id>`; else `Online Store > Themes > *<theme>* >
-**Preview**`; either way, "stay in that preview session". Never the PR's own preview theme. Market / viewport
-/ locale / customer state only when the behaviour depends on them, with how to set each — a viewport-dependent
-change names both ranges with the breakpoint in px ("check both a mobile viewport (under 1024px) and desktop
-(1024px and up)"), never "mobile" alone. No storefront
-passwords, no deploy or CI mechanics (workflows, pushes, tags, PR links); naming the branch a theme receives
-("the theme the TL deploys `develop` to") is allowed.
-
-**2. Where + setup.** Pages by path; the section or block **by the name the admin sees**, read from the
+**Labels.** A section, block or setting is named **by the label the admin shows**, read from the
 `{% schema %}` with `t:` keys resolved through `locales/en.default.schema.json`, never a code name. A label
-you cannot read is **unverified**: write it plus `(name as the code spells it — confirm the admin label)`
-and raise it in the presentation — marked, never dropped. Sub-bullets, one action each:
+you cannot read is **unverified**: write the best admin-style label the code name gives (`delivery_threshold`
+→ **Delivery threshold**), never the code spelling or a note in the field, and list it as unconfirmed in
+the presentation — raised, never dropped. A label outside `{% schema %}` and locales (a Fredhopper facet, a
+Talon.One campaign field, an app block setting) is copied from the diff's or `notes.md`'s literal storefront /
+admin text; without one, the best human label, listed as `unconfirmed: label:` naming the source it came from.
 
-- **Where** — the store by its alias, then the editor route as the admin shows it (`Online Store > Themes >
-  <theme> > Customize > <page / template>`) or one deep link,
-  `https://admin.shopify.com/store/<handle>/themes/<theme id>/editor?previewPath=<url-encoded path>`.
-- **Setup from scratch** — for everything the change adds and every setting whose default, options or wiring
-  it changes: **Add section** / **Add block** by their editor names, the placement, every setting that must
-  leave its default by its **label** with its value by its **option label**, the content, then **Save**. QA
-  builds it; an empty section on the QA theme is expected. The recipe may sit in item 2 or be the walk-through
-  steps themselves when building the section **is** the test.
-- **Already there** — from the repo, never from the QA theme's state, which you cannot see: in the template
-  JSON → "ships on the `<template>` template — find it in the sidebar, don't **Add section**"; else "if it is
-  missing, set it up as: …".
-- **Data you need** — in dependency order: store / market settings (toggle by verbatim label with its value) →
-  metafield definitions (owner · **Name** · `namespace.key` · type · `Settings > Custom data > … > Add
-  definition`) → metaobject definitions → entries (`Content > Metaobjects > <type> > Add entry`) → values →
-  fixtures. Tag **(store-wide)** or **(per-theme)** where it matters; store-wide data is shared with the live
-  theme — use QA fixtures.
-- **Restore** — a store-wide mutation ends with its restore in the same bullet (`(restore: Activate)`);
-  per-theme settings need none.
-- **Fixtures** — handle plus the property that makes it right: `e.g. /products/studio-fix-fluid (40+ shades,
-  in stock)`; the handle is the example, the properties the requirement. Once, after the first handle, as its
-  own sentence: `Handles are examples — if one is missing on your store, use any product with the same
-  properties and say which one you used.` Never folded into a parenthesis behind one product, where it reads
-  as a remark on that product instead of a rule for all of them. Both templates: on Bug item 4 the trigger
-  product and the boundary product are each an `e.g.` handle carrying the counts that make them trigger.
-  Every `e.g.` handle is a real product **on item 1's store when you write the steps**, confirmed there with
-  its properties — a `/base:shopify` lookup of the handle (`status: ACTIVE`) or the storefront's
-  `/products/<handle>.js` answering 200; a handle from `notes.md` or the developer counts only once confirmed
-  on that store (a dev-store repro handle is often missing on the QA store, and QA then reports "this product
-  does not exist"). Not there → use a confirmed product with the same properties instead; none found or no
-  access to that store → keep the handle, mark it **unconfirmed** and raise it at the ✋ checkpoint.
-- **Created in setup** — an entity that exists only once QA makes it (an issued gift card, a discount) is
-  named by its role, with where its value appears and whether it shows once. A state only time reaches is
-  a dated instruction (`**Expiration date** = today, check it the next calendar day`); the steps needing it
-  name their day.
+**1. Theme.** The environment (DEV / UAT / Prod), the store, the theme by label and id (order:
+`theme-resolution.md`), and the route that opens it: a confirmed id on a DEV or UAT store → the preview link
+`https://<store>.myshopify.com/?preview_theme_id=<id>`; a Prod store or an unconfirmed id →
+`Online Store > Themes > <theme> > Preview`, never a preview link.
+Never the PR's own preview theme. With the placeholder theme, the store is named as the developer answered
+or as the ticket names it, with no host and no preview link (the route form instead); a multi-brand repo
+with neither lists the store as unconfirmed. Market / viewport / locale / customer state only when the change
+depends on them — a viewport-dependent change names the breakpoint in px ("under 1024px" / "1024px and
+up"), never "mobile" alone. When `notes.md`, the ticket or the diff says a nearby environment cannot reach the
+change (a facet, app, market or setting absent there), one clause says so ("Not UAT: it has no **Size** filter"). No storefront passwords, no deploy or CI mechanics (workflows, pushes,
+tags, PR links); naming the branch a theme receives ("the theme the TL deploys `develop` to") is allowed.
 
-**3…n. Steps to replicate.** One pass through the feature **as built**: imperative, location before action,
-labels bold and verbatim, one action per step — or one chain along a single path. Every AC's functionality is
-exercised by a step, or discharged in n+2 when this ticket delivers it outside the theme. Not one scenario per
-AC, no regression sweep, no negative path unless the implementation has a deliberate one. Never restate setup;
-name a fixture by its item-2 role.
+**2. Object.** Where the change lives, nothing about what it does: pages by path (`/products/…`,
+`/collections/…`; a path is a page type, never a handle or a page that is already set up — the entity is
+item 3's property list), the template by name, the section / block by its admin label, a theme-settings
+group by its route (`Theme settings > <group>`; its values are item 3 bullets), every surface the change
+reaches (a card in two grids, the cart drawer row); three or more surfaces are grouped by page type
+("collection and product pages"), not listed one by one. **Not visible on screen** — a change in a request, response, dataLayer, cookie or console
+message: name the tool, the panel and the filter (`DevTools > Network, filter "cart", request
+/cart/update.js`); the expected value stays out (it is the AC).
 
-**Expectations sit inside the step that produces them** — "You should see …" — never a separate Expected
-block: one clause, concrete wherever a value is observable (copy verbatim, prices, counts), never "works
-correctly" or "or similar". A setup step's expectation may be what the setting accepts and what happens at its
-limits ("any size works, 1000x1000 preferred").
+**3. Setup.** What QA has to configure to reach the change, in dependency order: store / market settings →
+metafield and metaobject definitions → entries → values → theme settings → content. One bullet per
+action or per entity; everything the change adds or re-wires has its route and its non-default settings here.
+Item 3 makes reachable every state the Description or AC claims — the fixed state and every state the change
+deliberately keeps or limits ("trimming still happens under a size filter"); a kept state gets its setup
+bullet like an added one. Admin, store and theme state only: what the shopper does on the storefront while
+testing (a filter chosen, a search term typed, a cart below a threshold) is not a setup bullet — when it
+conditions the behaviour it is an item 4 fact; the data it needs (a product the search term returns) stays
+item 3 data.
 
-**n+1. Edge cases.** One per new or changed setting where blank, overflow or a boundary matters, plus the
-cases the named data already reaches (an entity without the value, a deactivated fixture, another market),
-each with its expected behaviour. A platform limitation is stated as not a bug (the colour picker cannot
-exclude `#ffffff`). Soft cap ≈ 4 — coverage outranks it.
+- **Theme editor** — **Add section** / **Add block** by their editor names with the placement, every
+  setting that must leave its default **by its label with its value** (an option by its **option label**,
+  a typed value with an `e.g.` that shows its shape: "plain numbers, one with pence, e.g. 40, 2.95"), the
+  content, then **Save**. A section the repo already ships on the template → "already on the `<template>`
+  template — find it in the sidebar"; read that from the template JSON, never assume the QA theme's state.
+- **Data as properties** — every entity QA needs is a requirement list, never a handle, a title or "the
+  page that is already set up": "a product with 3+ sizes, one sold out", "a collection holding it without
+  an enforced filter". A count or value in the list is the smallest that makes the changed behaviour
+  distinguishable from the unchanged one (one more than the trimming threshold, 3+ sizes when one is trimmed,
+  a threshold with pence), never the smallest that merely exists. A property inferred from code and not confirmed is listed as
+  `unconfirmed: data:` in the presentation. A definition is named by owner · **Name** ·
+  type and its route `Settings > Custom data > <owner> > Add definition`; a value on an entry by
+  `<Owner> > <entry> > Metafields` (`Collections > <the collection> > Metafields`), never the definition route.
+- **Created by QA** — an entity that exists only once QA makes it (a discount, an issued gift card, an
+  entry) is named by its role, with where its value appears.
+- **Store-wide mutation** — closed in the same bullet by its restore ("clear it afterwards if you set it",
+  `(restore: Activate)`); a **(store-wide)** tag is optional. Per-theme settings need none.
+- **Hiding state** — a store state that would hide or override the change (an active promotion or
+  free-shipping offer, an app override, a feature flag, a cookie / consent state) is named as a requirement
+  that it be absent or present ("no active free-delivery offer").
+- **Optional** — only setup that reaches an item 4 fact outside the Description and AC opens with `optional:`.
+- **Bug** — the admin / store / theme state that makes the defect reachable (data shape, viewport, market,
+  setting value), as requirements, plus the state the fix keeps or limits; never the root cause or the fix. A
+  storefront choice (a filter selected, a search typed) is an item 4 fact, not a bullet.
 
-**n+2. Context / out of scope.** The developer's choices that affect testing: new settings with their defaults
-and where a value comes from, what was intentionally left unchanged, known limits, copy from **Theme content**
-that should stay default, and what is **not** in this ticket — including an AC item delivered outside the
-theme, named as the AC names it. Up to five bullets, a clause each; omit the item only when the change made
-no choice worth stating.
+**4. Edge cases / not obvious.** Facts from the diff and `notes.md` only, and only facts this change creates or changes, platform limits it hits and
+what this ticket deliberately leaves out; behaviour nearby code already had is not an item 4 fact unless
+QA would file it as a defect of this change. Facts QA would otherwise misread, one clause each: a boundary or blank
+value and what the build does with it by design; a platform limit stated as not a bug ("comma decimals are
+not supported"); a state only time reaches, as a fact (`**Expiration date** = today: the expired state
+appears only the next calendar day`); what is intentionally out of this ticket; a developer decision that looks
+like a defect; a visible change in the diff the Description does not mention (a moved element, a restyled
+control), stated as a fact with "by design" — the one "what changed" allowed; with no AC, a by-design
+difference QA would otherwise file (£40 in one place, £40.00 in another); for an off-screen change, the
+field that changes — never its value. Never a scenario
+("open X, click Y"), never an expected result the AC already states. Either one line of clauses separated
+by semicolons on the item's own line, or nested bullets, one fact each.
 
-**Bug item 4 — What to expect.** A lead line plus one nested bullet per case, never one paragraph: a QA
-engineer reading one block of prose cannot tell which page, viewport or product each expectation belongs
-to. The **lead line** names the trigger fixture by role with its `e.g.` handle, the counts / values that
-made it trigger and the admin route, then the substitution sentence; a fix whose rendering does not depend
-on viewport says `any viewport` here once. Each **bullet** is one case, opened by a bold label naming what
-sets it apart — the viewport with its breakpoint (`**Mobile (under 1024px):**`), the page or surface
-(`**Search card:**`), the data state (`**Bundle without a campaign:**`) — then the action, location first,
-and its expectation with exact values, as a walk-through step would carry it. Cases, in order: the state
-that used to break; every further surface or viewport the fix reaches, one bullet each; the boundary — the
-second `e.g.` handle with its properties, or a setting blank / past its limit — with its restore; last,
-`**Regression:**` — what a failure looks like, one clause per sign. Two cases never share a bullet, and
-no bullet repeats the lead line's fixture.
-
-**Visual aids.** Where a location or setup step is not obvious from text, ask the developer **in the
-presentation**, never as a line in the field, to attach a screenshot or short video by hand; the plugin
-uploads nothing.
+**Screenshots.** Setup only — a route or setting not obvious from text — never a result (result
+screenshots stay in the PR; QA finds them through the PR-link comment). They are asked for **in the
+presentation**, as `screenshot:` lines for the developer, never as a line in the field. The developer
+attaches each by hand **after item 4**, with a one-line caption (`Item 3 — Delivery Banner settings`), so
+the list is never broken by an image; the plugin uploads nothing.

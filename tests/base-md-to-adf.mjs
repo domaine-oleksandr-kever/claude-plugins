@@ -134,6 +134,28 @@ for (const [label, input] of [['empty', ''], ['blank', '  \n\t\n']]) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// ------------------------------------------------ the Steps to Test skeleton, --no-tables --
+// references/steps-to-test/templates.md indents item 3 and 4 bullets by three spaces; the field has to
+// reach Jira as ONE ordered list of four items, the bullets nested under their own item.
+const STT_MD = [
+  '1. **Theme:** DEV — sample store, theme **QA** (100000000001); `Online Store > Themes > QA > Preview`.',
+  '2. **Object:** page `/pages/sample` — the **Sample block** section.',
+  '3. **Setup:**',
+  '   - **Heading** → `Sample heading`, then **Save**;',
+  '   - a product with 3+ sizes, one sold out.',
+  '4. **Edge cases / not obvious:** **Heading** blank: no heading, by design.',
+].join('\n');
+{
+  const adf = m2a(STT_MD, ['--no-tables']);
+  check('stt-one-ordered-list', adf.content.map((b) => b.type), ['orderedList']);
+  const items = adf.content[0].content;
+  check('stt-item-shapes', items.map((it) => it.content.map((b) => b.type).join('+')),
+    ['paragraph', 'paragraph', 'paragraph+bulletList', 'paragraph']);
+  check('stt-item3-bullets', items[2].content[1].content.map((it) => it.content[0].content[0]),
+    [t('Heading', [strong]), t('a product with 3+ sizes, one sold out.')]);
+  check('stt-item4-label', items[3].content[0].content[0], t('Edge cases / not obvious:', [strong]));
+}
+
 // ---------------------------------------------- round trips through slim's adf engine --
 // markdown → ADF (base) → markdown (slim) → ADF (base): the visible text survives, and one cycle is
 // a fixpoint. Mark boundaries may move onto a neighbouring space on the first cycle (`**bold **`
@@ -171,6 +193,7 @@ const CORPUS = [
   'Unicode — “quotes”, non breaking, emoji 🙂',
   '- [ ] todo with [a link](https://x.test)\n- [x] done\n  - [ ] nested',
   '1. Open the page\n\n2. Click **Add**\n\n   - a\n   - b\n\n3. Close\n\nDone.',
+  STT_MD,
 ];
 for (const [i, md] of CORPUS.entries()) {
   for (const args of [[], ['--no-tables']]) {

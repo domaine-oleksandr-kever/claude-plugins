@@ -2,22 +2,25 @@
 
 One section of the Steps to Test format; the index is `../steps-to-test-format.md`.
 
-These bind both templates; n+1 / n+2 and the walk-through rules name General items only.
-
-- **One physical line per item.** Never wrap an item or a nested bullet: `md-to-adf --no-tables` reads a
-  continuation line as a new paragraph and splits the list. Fold a second paragraph in or nest it.
-- **One ordered list, end to end** — numbering runs through, Edge cases and Context last. No headings, no `✅`
-  markers, no tables; nested bullets one level deep, under items 2, n+1 and n+2 (General) and item 4 (Bug).
-- **No document meta** — no title, summary, revision history or rationale.
-- **Observable words only** — labels as the UI spells them, copy as it renders; no setting ids, DOM
-  attributes, ARIA roles, class names, file paths or locale keys. An a11y expectation says what a screen
-  reader does; **Theme content** copy is its admin route plus the string it renders.
-- **No hedged actions** — no "if present", "roughly", "skip if": an action is taken or the step goes. A
-  conditional inside an expectation is fine, as are item 2's "if it is missing …" and item 1's unconfirmed
-  theme; a dated instruction is an action, not a hedge.
-- **Absolute hosts only where they are the address** — item 1's store host and preview link, one admin/editor
-  deep link in item 2; storefront paths in items 3…n stay relative. Never fork per store.
-- **Size.** 150–350 words; setup-heavy (a section built from scratch, fixtures QA creates) up to 450. Coverage
-  of items 1, 2 and n+2 outranks the budget; trim walk-through prose, repetition and edge cases first, never
-  setup detail, a step's expectation or a developer choice. A cap, not a floor — a one-setting change is
-  legitimately Example-2 short.
+- **One physical line per item and per bullet.** Never wrap: `md-to-adf --no-tables` reads a
+  continuation line as a new paragraph and splits the list. Fold a second sentence in or nest it.
+- **One ordered list, items 1–4**, numbered through. Nested bullets one level deep, under items 3 and 4
+  only. No headings, tables, `✅` markers, accordion / expand blocks, troubleshooting or FAQ blocks — QA
+  asks in the ticket.
+- **Field-ready, no document meta** — no title, summary, revision history or rationale; no note to the developer,
+  brief text or line meant for an agent.
+- **No repetition.** QA reads the Description and AC first: no feature summary, no AC paraphrase, no root
+  cause, no "what changed".
+- **Setup, not testing.** No walk-through, no "You should see …", no expected results, no pass / fail
+  language — QA decides how to test from the AC.
+- **Observable words only** — labels as the admin spells them, in bold; routes as `A > B > C`; paths as
+  `/products/…`. No code identifiers, file names, setting ids, class names, DOM attributes or locale keys.
+- **No hedged actions** — no "if present", "roughly", "skip if": an action is taken or the bullet goes.
+  An `optional:` setup bullet, item 1's unconfirmed theme and a time-only state are not hedges.
+- **Absolute hosts only in item 1** — the store host and the preview link; every other path stays
+  relative. Never fork per store.
+- **Banned:** deploy or CI mechanics, storefront passwords, the PR's own preview theme, "works correctly",
+  "or similar".
+- **Size.** Target 50–120 words; a one-setting change can be 30. Every sentence is an action or a fact QA
+  needs to reach the change — cut anything else. Over the target, cut wording and item 4 first, never a
+  setup bullet item 3 needs.

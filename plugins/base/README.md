@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.17.0**.
+Current release: **base v0.18.0**.
 
 ## Status
 
@@ -117,7 +117,7 @@ that every cited path exists.
 | `references/task-workspace.md`, `references/task-workspace-freshness.md` | the `.claude/tasks/<work-id>/` layout, its read and write rules, `progress.md`, the freshness probes |
 | `references/review-flow.md` | the branch review flow: the `.git/.base-review` marker, which agent runs which check |
 | `references/commit-message-format.md` | Conventional Commits with the house rules |
-| `references/steps-to-test-format.md` | the Steps to Test field's General and Bug templates and the theme resolution: what a team plugin's Steps to Test writer writes and `/qa:preflight` reads rows from — an index; the sections are in `references/steps-to-test/` (templates, item-rules, shape-and-size, theme-resolution, self-check) |
+| `references/steps-to-test-format.md` | the Steps to Test field's one four-item skeleton (Theme · Object · Setup · Edge cases / not obvious, feature and bug alike) and the theme resolution: what a team plugin's Steps to Test writer writes and `/qa:preflight` reads its setup from — an index; the sections are in `references/steps-to-test/` (templates, item-rules, shape-and-size, theme-resolution, self-check) |
 | `references/break-it-qa.md` | the break-it QA method: deriving and executing the hostile-value and timing rows of a team plugin's QA and of `/qa:preflight` |
 | `references/shopify-recipes.md` | `/base:shopify`'s Admin GraphQL recipes, validated on API 2026-10 with their scopes and how to read each answer; the PDP "why does X not show" checklist; the `metafieldsSet` and `productUpdate` templates |
 | `references/shopify-custom-data.md` | metafield and metaobject rules: `$app` vs merchant namespaces, definitions, `metafieldsSet` writes, metaobject `ACTIVE` status, reference metafields |
