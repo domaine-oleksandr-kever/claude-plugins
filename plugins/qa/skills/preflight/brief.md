@@ -6,7 +6,7 @@ does.
 
 ## A filled brief
 
-A Partially pass run: two rows verified, one waiting on data, a stand-in used. Copy the Block 1
+A Partially pass run: two rows verified, one waiting on data, a fixture found by its properties. Copy the Block 1
 wording as it stands — it is what QA readers expect to see:
 
 ```markdown
@@ -43,7 +43,7 @@ by the agent at the viewports named.*
 
 **Observations**
 
-- stand-in: `/products/velvet-foundation` for e.g. `/products/silk-foundation` (40+ shades, in stock)
+- fixture: `/products/velvet-foundation` (40+ shades, in stock)
 
 **Route:** ready for hands-on QA
 
@@ -94,7 +94,7 @@ nothing under it stays one line (`**Needs data:** none`); **Route** and **Deploy
   — <page URL as opened>[, <second page URL>]`. When no row was judged so, the **hands-on pass**
   instead, one bullet per row that ran: `hands-on pass — row <n> — open <URL>, <clicks> — look at
   <what the row proves>`, rows sharing a fixture and path collapsed into one bullet. The URL is the
-  exact fixture the run used (the stand-in when one replaced an example), as opened — never the
+  exact fixture the run used (rows.md → Fixtures), as opened — never the
   storefront root; a result in the cart, checkout, a drawer or a modal starts at the product the run
   added and spells the clicks (`add to bag`, `open the cart drawer`, `apply code SAVE10`). `none`,
   `all rows verified` and any wording that says the engineer need not look are forbidden — **except on
@@ -121,7 +121,7 @@ nothing under it stays one line (`**Needs data:** none`); **Route** and **Deploy
   When the theme under test is live or shared, say so on the row and leave the choice to the engineer.
 - **Developer gaps** — a Steps/AC contradiction, a missing page, an absent AC, a ticket question.
 - **Observations** — facts the ticket does not imply (a non-code root cause, a second broken thing, a
-  404, `gh unavailable:`, a stand-in, the store notes quoted fenced), never a verdict.
+  404, `gh unavailable:`, a fixture or stand-in, the store notes quoted fenced), never a verdict.
 - **Route** — `ready for hands-on QA` | `back to developer` | `back to the QA engineer's theme choice /
   deploy owner` | `nothing to test in the theme → <deploy/content owner>`.
 - **Deployed** — last, one line, the developer's trace: `theme <id> <label> (<live | preview link>,

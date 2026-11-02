@@ -1,37 +1,54 @@
 # QA Preflight — rows and evidence
 
-Phase 4 of `/qa:preflight`: which rows run, how they run, what counts as evidence, and stand-in
-fixtures. `<base root>` is the path on base's `base plugin root:` session line.
+Phase 4 of `/qa:preflight`: which rows run, how they run, what counts as evidence, and the
+fixtures they run on. `<base root>` is the path on base's `base plugin root:` session line.
 
 ## Rows from Steps to test
 
-The field arrives in either of two shapes, both accepted; a field that mixes them is read item by
-item, and a shape complaint is at most a **Developer gaps** line, never a Block. The numbered shape is
-base's `steps-to-test-format.md` — the table below is all this run needs from it; do not read it.
+The field tells QA how to **set the change up**, not how to test it: this run performs the setup it
+can, then checks the AC. The current shape is base's `steps-to-test-format.md` — the table below is
+all this run needs from it; do not read it: `1. **Theme:**` · `2. **Object:**` · `3. **Setup:**` ·
+`4. **Edge cases / not obvious:**`, for a feature and a bug alike. No expectations in it: the rows come
+from the AC. A field in an older shape is read per **Older shapes (read only)** below; a field that
+mixes shapes is read item by item, and a shape complaint is at most a **Developer gaps** line, never a
+Block.
 
-- **Numbered** — opens with `1.` and its item 1 names the theme.
-- **Headed** (the older shape) — `Setup`, `✅ Checkpoint`, `Scenario` headings. One row per
-  scenario, the regression sweep's included; the checkpoint is the theme proof the gate already ran;
-  the Setup block feeds **Needs data** only when the fixture or setup it describes is absent, never
-  rows.
-
-| Item (numbered) | What it gives this run |
+| Item | What it gives this run |
 |---|---|
-| **1 — Theme** | the ticket's theme for the theme question (gate.md), plus the market / locale / customer state / incognito conditions the rows run under — one this run cannot set read-only is `not-executable: access` on the rows that need it; a viewport named here never narrows the two passes. Never a row |
-| **2 — Where + setup** | the target page's path, and the material of a **Needs data** recipe (editor route, every setting by its label with its value, data sub-bullets in order, Save, a `(restore: …)` clause) — copied into a recipe only when the fixture or setup is absent. Never a row |
-| **3…n — walk-through** | one row per step this run can perform read-only — a storefront action carrying an expectation, in field order, the expectation quoted as the expected result. An **editor or Admin write** step (Add section / block, a setting set, Save, a fixture issued) is never a row, even with an expectation: it feeds a recipe, and a row it would make unobservable is `not-executable: access`, naming the write and its restore. Pure navigation folds into the next row |
-| **n+1 — Edge cases** | one row per bullet, its stated behaviour the expected result; one a read-only run cannot reach is `not-executable: access` or `needs data`. A platform limitation stated as *not a bug* is a row confirming that behaviour, never a Fail |
-| **n+2 — Context / out of scope** | never rows: context for the other rows — a known limit here is not a Fail; a choice contradicting the AC is an **Observations** line |
+| **1 — Theme** | the ticket's theme for the theme question (gate.md), plus the market / locale / viewport / customer state the rows run under — one this run cannot set read-only is `not-executable: access` on the rows that need it; a viewport named here never narrows the two passes. Never a row |
+| **2 — Object** | the target page's path — a `/products/…` placeholder is a page type, Fixtures below picks the entity — and every surface the rows visit; for a change not visible on screen, the tool, panel and filter the rows read it in (Network requests, a dataLayer, a cookie, the console). Never a row |
+| **3 — Setup** | the setup this run performs before the rows. A data bullet is a property list: Fixtures below finds a catalog entity that has every property, read-only. An editor or Admin write (Add section / block, a setting by label and value, Save, a definition or entry, a store-wide change with its restore) is never performed: present already → go on; absent → a **Needs data** recipe built from the bullet, and the rows it would make unobservable are `not-executable: access`. An `optional:` bullet serves only the item 4 row that needs it. Never a row |
+| **4 — Edge cases / not obvious** | one row per fact a read-only run can reach, the fact the expected result: a boundary or blank value, a platform limit stated as *not a bug* (a row confirming it, never a Fail), a field that changes off screen (its value from the AC). A time-only state is `not-executable: access`; an area stated as out of this ticket gets no row — a defect seen there is an **Observations** line |
 
-**Bug template** (theme · why it happened · what changed · what to expect): item 1 as above, items 2–3
-context; item 4's lead line names the trigger fixture and feeds **Needs data** like item 2; then one
-row per nested bullet, its bold label (viewport, surface, data state) the condition, its expectation
-the expected result. The **Regression** bullet adds no row: each sign it lists is checked inside the
-row whose case it names. An older item 4 written as one paragraph gives one row per expectation clause.
+**AC rows.** With the four-item shape every AC item is a row, run on the setup item 3 built, its
+expected result the AC's own words. With an older shape, add a row only for an AC no row reaches —
+never the same check twice. Rows are numbered through the brief in its own order; `NN` in a screenshot
+path is that number.
 
-**AC rows.** Check which AC each row covers and add a row only for an AC no row reaches — never the
-same check twice. Rows are numbered through the brief in its own order; `NN` in a screenshot path is
-that number.
+### Older shapes (read only)
+
+Fields written before the four-item format are still read; nothing writes them any more.
+
+- **Numbered walk-through** — opens with `1.`, item 1 the theme, then where + setup, steps that each
+  carry an expectation, edge cases, context. Item 1 as above; where + setup as item 3 above; one row
+  per step this run can perform read-only, in field order, its expectation quoted as the expected
+  result (an editor or Admin write step is never a row — it feeds a recipe; pure navigation folds into
+  the next row); one row per edge-case bullet as item 4 above; the context item gives no rows — a known
+  limit there is not a Fail. A walk-through row continues from the step before it and keeps its cart.
+- **Its Bug variant** — theme · why · what changed · what to expect: items 2–3 are context; item 4's
+  lead line names the trigger fixture (Fixtures below) and each nested bullet is a row, its bold label
+  the condition; the **Regression** bullet adds no row — each sign it lists is checked inside the row
+  whose case it names.
+- **Headed** — `Setup`, `✅ Checkpoint`, `Scenario` headings. One row per scenario, the regression
+  sweep's included; the checkpoint is the theme proof the gate already ran; the Setup block feeds
+  **Needs data** only when the fixture or setup it describes is absent, never rows.
+- **`e.g.` handles** — catalog fixtures named as examples (`e.g. /products/silk-foundation (40+ shades,
+  in stock)`): the properties are the requirement, the handle a suggestion. A handle the store lacks
+  is a **missing example** — never a wrong theme, not yet `needs data` — and a stand-in replaces it
+  (Fixtures, from step 1), recorded as `stand-in: /products/<used> for e.g. /products/<named>
+  (<properties matched>)`. A handle written without `e.g.` is matched on the properties its own bullet
+  states, else what the rows expect of it; with neither, the row is `needs data`, naming the missing
+  handle.
 
 ## Running the rows
 
@@ -39,9 +56,8 @@ that number.
 row; then `emulate pageId, viewport: "375x812x3,mobile,touch"` and reload, run every row again — a
 resized desktop window misses touch-only behaviour. Reload after each `emulate` so load-time gates
 re-run. **Before each pass**, and within a pass before every row that starts a fresh scenario (an
-edge case, a Bug item 4 bullet, a headed scenario, an AC row), the cart is empty and no checkout is
-open — clear it or abandon the checkout. A walk-through row continues from the step before it and
-keeps its cart.
+AC row, an edge case, an older shape's scenario), the cart is empty and no checkout is open — clear
+it or abandon the checkout.
 
 - **Checkout** is walked only to the payment step: line items, quantities, bundles, discounts,
   shipping options, totals. Contact and address values come from the ticket, the workspace
@@ -99,8 +115,8 @@ keeps its cart.
 - **Pass** / **Fail** — measured and right / measured and wrong. A row that passed on desktop and
   failed on mobile is a Fail with the mobile screenshot.
 - **`needs data: <what, where>`** — the fixture the row needs is absent (no product with the
-  metafield, no discount code, an empty metaobject); for an `e.g.` catalog handle only after the
-  stand-in search found nothing. Block 2 turns it into a recipe (brief.md).
+  metafield, no discount code, an empty metaobject, a section item 3 adds); for catalog data only after
+  the Fixtures search found nothing. Block 2 turns it into a recipe (brief.md).
 - **`for human eyes`** — visual polish against a design, hover and transition feel, copy tone,
   animation timing: anything the brief would be guessing. A first-class outcome, not a failure.
 - **`not-executable: access`** — needs a write or a condition this read-only run does not have.
@@ -108,11 +124,11 @@ keeps its cart.
 A value never measured is never a Pass or a Fail. **Verified n/m** counts rows with evidence at both
 viewports over all rows.
 
-## Stand-in fixtures
+## Fixtures
 
-Steps to test names catalog fixtures as examples (`e.g. /products/silk-foundation (40+ shades, in
-stock)`): the properties are the requirement, the handle a suggestion. A product / collection handle
-the store lacks is a **missing example** — never a wrong theme, not yet `needs data`.
+The four-item field names data by its properties only (`a product with 3+ sizes, one sold out`): this
+run finds a catalog entity that has them, from step 2. An older field's `e.g.` handle starts at step 1
+(Older shapes above).
 
 1. **Confirm it is missing** — `https://<domain>/products/<handle>.js` (a collection:
    `/collections/<handle>/products.json`) answers 404 on the unlocked storefront.
@@ -127,15 +143,13 @@ the store lacks is a **missing example** — never a wrong theme, not yet `needs
 3. **Match every stated property** — variant / shade count, stock on the variant the row uses, the
    metafield, the tag, the template, a grouping the field names. A property no read exposes is checked
    on the candidate's page; a candidate that lacks it is discarded, not failed.
-4. **Use it wherever the example was used** — the gate's target page, every row naming the fixture,
-   the brief's URLs. Record once in **Observations**: `stand-in: /products/<used> for e.g.
-   /products/<named> (<properties matched>)`.
+4. **Use it wherever the fixture is needed** — the gate's target page, every row naming the fixture,
+   the brief's URLs. Record once in **Observations**: `fixture: /products/<used> (<properties
+   matched>)`, or an older field's `stand-in:` line (Older shapes above).
 5. **Nothing matches** → `needs data`, its recipe creating or editing a product with the stated
    properties, first line saying what was searched (`searched 412 products for 5+ shades in 2+
    families: none`).
 
 Only catalog fixtures are substituted (products, collections, a page by handle). A metafield, a
 metaobject, a template, a discount code, a section or block is what the change is built on: absent, it
-is a **Developer gap** or `needs data`. A handle written without `e.g.` is matched on the properties
-its own bullet states, else what the rows expect of it; with neither, the row is `needs data`, naming
-the missing handle.
+is a **Developer gap** or `needs data`.

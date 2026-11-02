@@ -2,8 +2,8 @@
 name: preflight
 description: >
   Preflight Jira tickets for QA: ticket, PR and store facts, a storefront proved to serve the theme
-  under test, Steps to Test pre-run with screenshots. Use when asked to preflight a ticket, pre-run
-  QA or for a QA brief.
+  under test, the Steps to Test setup checked and the AC pre-run with screenshots. Use when asked to
+  preflight a ticket, pre-run QA or for a QA brief.
 argument-hint: "<KEY> [<KEY> ...]"
 arguments:
   - name: tickets
@@ -22,7 +22,7 @@ beside this one — read it when its phase starts:
 | File | Read at | Holds |
 |---|---|---|
 | `<qa root>/skills/preflight/gate.md` | Phase 1 | PR discovery, what the run can test, the store registry, the theme question, page URLs, the unlock and the theme gate |
-| `<qa root>/skills/preflight/rows.md` | Phase 4, or Phase 3 when the gate's target page 404s on an `e.g.` handle (Stand-in fixtures) | rows from Steps to test, the two viewport passes, evidence, outcomes, stand-in fixtures |
+| `<qa root>/skills/preflight/rows.md` | Phase 4, or Phase 3 when the gate's target page is a placeholder path or 404s on an older field's `e.g.` handle (Fixtures) | rows from Steps to test and the AC, the two viewport passes, evidence, outcomes, fixtures |
 | `<qa root>/skills/preflight/brief.md` | Phase 5 | a filled brief, the Block 1 and Block 2 rules, the chat output, the Jira comment |
 
 Not for this skill to read: `<base root>/references/steps-to-test-format.md` (rows.md maps it) and
@@ -63,7 +63,7 @@ Read `gate.md` first.
    Read rule.
 3. **PR facts** — the `gh` call and the diff: gate.md → PR discovery. A non-zero exit is not "no PR".
 4. **Decide what the run can test** — gate.md → Classify and decide. A non-theme change, nothing to
-   test, or no Steps to test and no AC stops the ticket here — before the registry and the browser —
+   test, or no AC with a Steps to test field that is empty or in the four-item shape stops the ticket here — before the registry and the browser —
    with its brief (Phase 5); the other tickets go on.
 5. **Name the session after the ticket** — base titles a session `<KEY> — <summary>` once, and only for
    a ticket it can corroborate, so the title may not name this run. When the
@@ -92,9 +92,11 @@ follows `<base root>/references/storefront-login.md`.
 
 ## Phase 4 — Execute
 
-Read `rows.md`. Rows from Steps to test (either shape) plus any AC no row reaches; every row on desktop
-`1440x900`, then every row on mobile `375x812` emulation; the cart is cleared before each pass and
-before each row that starts a fresh scenario, never between chained walk-through steps. Per row: DOM evidence via `evaluate_script` and one screenshot per pass, saved with `filePath`,
+Read `rows.md`. The Steps to test setup first (item 3: fixtures found by their properties, a write
+this run cannot do turned into a recipe), then the rows — the AC and the item 4 facts (an older field:
+its steps, plus any AC no row reaches); every row on desktop `1440x900`, then every row on mobile
+`375x812` emulation; the cart is cleared before each pass and before each row that starts a fresh
+scenario, never between chained steps of an older walk-through. Per row: DOM evidence via `evaluate_script` and one screenshot per pass, saved with `filePath`,
 never read back. Every desktop row showing the pre-change behaviour → gate.md step 4.
 
 ## Phase 5 — Brief

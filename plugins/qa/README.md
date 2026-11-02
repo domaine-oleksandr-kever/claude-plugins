@@ -9,7 +9,8 @@ The preflight does these steps:
 1. It reads the ticket and its PR.
 2. It unlocks the storefront.
 3. It proves which theme is under test.
-4. It pre-runs the Steps to Test at desktop and mobile, with screenshots.
+4. It checks the Steps to Test setup (fixtures found, missing setup as recipes), then checks the AC at
+   desktop and mobile, with screenshots.
 5. It writes a brief in Domaine's Jira house style.
 
 qa also holds the read-only store-access posture that a preflight works under.
@@ -19,7 +20,7 @@ store registry (`<base root>/scripts/qa-stores.cjs`), the shared references and 
 MCP server ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with slim
 too.
 
-Current release: **qa v0.4.3**.
+Current release: **qa v0.5.0**.
 
 ## Status
 
@@ -51,14 +52,14 @@ automatic start.
 
 | Skill | Does | Uses / hands off to |
 |---|---|---|
-| `/qa:preflight <KEY> [<KEY> ...]` | preflights tickets for hands-on QA: ticket, PR and store facts, the theme under test asked for and proved on the storefront, Steps to Test and the AC pre-run at desktop and mobile with screenshots, a two-block brief (house style for Jira, preflight notes for the engineer); posts Block 1 as a Jira comment only on a yes per key | `base:jira-reader`, base's chrome-devtools MCP, local `gh` / `git`, `<base root>/scripts/qa-stores.cjs`; `base:jira-writer` after approval → the engineer's hands-on pass, or back to the developer |
+| `/qa:preflight <KEY> [<KEY> ...]` | preflights tickets for hands-on QA: ticket, PR and store facts, the theme under test asked for and proved on the storefront, the Steps to Test setup checked (fixtures found by their properties, missing setup as recipes) and the AC pre-run at desktop and mobile with screenshots, a two-block brief (house style for Jira, preflight notes for the engineer); posts Block 1 as a Jira comment only on a yes per key | `base:jira-reader`, base's chrome-devtools MCP, local `gh` / `git`, `<base root>/scripts/qa-stores.cjs`; `base:jira-writer` after approval → the engineer's hands-on pass, or back to the developer |
 
 The skill keeps its details beside its `SKILL.md`, in one file per stage. The skill reads each file
 when its phase starts:
 
 - `gate.md`: PR discovery, what the run can test, the store registry, the theme question, page URLs,
   the unlock and the theme gate.
-- `rows.md`: rows from Steps to Test, the two viewport passes, evidence, stand-in fixtures.
+- `rows.md`: rows from Steps to Test and the AC, the two viewport passes, evidence, fixtures.
 - `brief.md`: a filled brief, the Block 1 and Block 2 rules, the chat output, the Jira comment.
 
 ## References
@@ -69,7 +70,7 @@ qa ships no reference of its own. The skill cites base's references by their pat
 | Reference (base's) | Read for |
 |---|---|
 | `references/task-workspace.md` | the `.claude/tasks/<KEY>/` workspace read first, and the progress close-out |
-| `references/steps-to-test-format.md` | cited, not read: `rows.md` maps its numbered shape to rows |
+| `references/steps-to-test-format.md` | cited, not read: `rows.md` maps its four items (and the older shapes) to setup and rows |
 | `references/break-it-qa.md` | the break-it rows, non-destructive only; `not-executable: access` for the rest |
 | `references/jira-adf-write.md` | cited, not read: `base:jira-writer` reads it for the opt-in Jira comment |
 

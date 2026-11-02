@@ -39,9 +39,10 @@ From the PR file list and the ticket, before the registry and the browser:
 - **theme** — the normal path, Phases 2–6.
 - **non-theme** (app, proxy, content, data) or **nothing to test** → **Block 2 only**: no Block 1, no
   Phase 6 offer, Route `nothing to test in the theme → <deploy/content owner>`. Stop.
-- **Steps to test empty and no AC** (the field empty, nothing AC-shaped in the Description) →
-  **Block**, `no acceptance criteria to verify`, Route `back to developer` — never rows invented from
-  the diff. Stop.
+- **No AC** (nothing AC-shaped in the AC field or the Description) and **Steps to test empty or in the
+  four-item shape** → **Block**, `no acceptance criteria to verify`, Route `back to developer` — the
+  four items carry no expectations, so rows come only from the AC; item 4 facts alone never make a run,
+  and no row is invented from the diff. Stop.
 - **Steps to test empty, AC present** → rows come from the AC; record `Developer gaps: Steps to test
   empty`. Go on.
 
@@ -112,7 +113,8 @@ options, the first and last always listed:
 | "Paste the preview link you test on" | always, as a listed option; the link arrives in the free-text answer | that link verbatim, target path swapped in |
 
 A ticket link on another host is a **different store**: resolve and unlock it on its own, or do not
-offer it. An unconfirmed placeholder in item 1 (`[QA] theme — confirm with the TL`) names no theme.
+offer it. An unconfirmed placeholder in item 1 (theme **<confirm with the TL>**, or an older field's
+`[QA] theme — confirm with the TL`) names no theme.
 
 **Evidently the PR's preview** — a ticket link or bare id is dropped from the options when any test
 holds:
@@ -210,11 +212,12 @@ a function declaration (an arrow function), never a bare expression.
    | `role: "main"`, engineer chose live | expected: record the `id` and `name` read as the theme under test |
    | `id` matches their theme, `role: "unpublished"` | expected for a preview link |
    | a preview link, but `role: "main"` | their link does not reach that theme (a deleted id renders the published one): say so in **Observations**, ask for another link or live — the replacement link — else **Block**, `theme <id> not reachable`. Wins over the last row |
-   | `id: null` | not a storefront render (404, challenge, redirect to `/password`) → as the last row, except: a 404 on an `e.g.` handle is a missing fixture (rows.md → Stand-in fixtures) — rerun the gate on the stand-in; and a page reading "cannot be previewed" (`/cannot be previewed/i` on `document.title` + `document.body.innerText`) → **Observations**, the replacement link, else **Block**, `preview theme <id> empty or unpreviewable` |
+   | `id: null` | not a storefront render (404, challenge, redirect to `/password`) → as the last row, except: a 404 on an older field's `e.g.` handle is a missing fixture (rows.md → Older shapes) — rerun the gate on the stand-in; and a page reading "cannot be previewed" (`/cannot be previewed/i` on `document.title` + `document.body.innerText`) → **Observations**, the replacement link, else **Block**, `preview theme <id> empty or unpreviewable` |
    | `id` differs from their preview theme | re-navigate **once** (the preview cookie may land late); still different → **Block**, `theme <id> not reachable`, naming the store that answered and what `Shopify.theme` returned |
 
-   **Target page**, in order: a URL or path in Steps to test → a path in the ticket (path only, a
-   bare `/` does not count) → a storefront path the PR body names in prose (never its Preview URL or
+   **Target page**, in order: a URL or path in Steps to test (item 2's `/products/…` placeholder
+   is a page type: rows.md → Fixtures picks the entity, read before the gate) → a path in the
+   ticket (path only, a bare `/` does not count) → a storefront path the PR body names in prose (never its Preview URL or
    deep-links) → the template the diff touches (`templates/<name>.json` → its storefront path) → ask
    the QA engineer. Never guess a handle: a gate passed on the home page proves nothing about a PDP
    change. This decides the path; Page URLs decides the URL around it.

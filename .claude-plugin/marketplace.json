@@ -40,7 +40,7 @@
     {
       "name": "qa",
       "source": "./plugins/qa",
-      "description": "Domaine QA team plugin for Claude Code: the preflight skill (Jira ticket, PR and store facts, a storefront unlocked on the theme under test, Steps to Test pre-run at desktop and mobile, a brief in the house style) and the read-only store-access posture; requires base (and slim through it)",
+      "description": "Domaine QA team plugin for Claude Code: the preflight skill (Jira ticket, PR and store facts, a storefront unlocked on the theme under test, the Steps to Test setup checked (fixtures found, missing setup as recipes) and the AC pre-run at desktop and mobile, a brief in the house style) and the read-only store-access posture; requires base (and slim through it)",
       "license": "MIT"
     },
     {
