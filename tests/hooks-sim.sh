@@ -6454,8 +6454,8 @@ printf '# ABC-1591 — Header logo\n\nbody\n' > "$TP/.claude/tasks/ABC-1591/tick
 ti_in() { DH_IN="{\"session_id\":\"$1\",\"cwd\":\"${TI_CWD:-$TP}\",\"hook_event_name\":\"$2\"${3:+,$3}}"; }
 ti_title() { printf '%s' "$DH_OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).hookSpecificOutput.sessionTitle||"")}catch{}})'; }
 ti_by() { dh_json "$(BLOG "$1")/title.json" 'j.by + "|" + (j.title || "") + "|" + j.sid + "|" + typeof j.ts'; }
-ti_start() { ti_in "$1" SessionStart "\"source\":\"startup\"${2:+,$2}"; dh base SessionStart 2; }
-ti_prompt() { ti_in "$1" UserPromptSubmit "\"prompt\":\"$2\"${3:+,$3}"; dh base UserPromptSubmit 0; }
+ti_start() { ti_in "$1" SessionStart "\"source\":\"startup\"${2:+,$2}"; DH_ENV="${TI_ENV-BASE_SESSION_TITLE=1}" dh base SessionStart 2; }
+ti_prompt() { ti_in "$1" UserPromptSubmit "\"prompt\":\"$2\"${3:+,$3}"; DH_ENV="${TI_ENV-BASE_SESSION_TITLE=1}" dh base UserPromptSubmit 0; }
 
 dh_home title
 git -C "$TP" checkout -q -b feature/ABC-1591-x
@@ -6484,10 +6484,15 @@ assert_eq DHT4-user-start "$dh_rc|$DH_OUT|$(ti_by t-user)" "0||user||t-user|numb
 ti_prompt t-user 'ABC-77 please' '"source":"user"'
 assert_eq DHT4-user-kept "$DH_OUT" ""
 
-DH_ENV="BASE_SESSION_TITLE=0" ti_start t-off
-DH_ENV="BASE_SESSION_TITLE=0" ti_prompt t-off 'ABC-77' '"source":"user"'
-assert_eq DHT5-switch-off "$dh_rc|$DH_OUT" "0|"
-if [ ! -e "$(BLOG t-off)" ]; then ok; else bad DHT5-no-dir "BASE_SESSION_TITLE=0 wrote under the log dir"; fi
+for v in unset 0 off; do
+  if [ "$v" = unset ]; then TI_ENV=""; else TI_ENV="BASE_SESSION_TITLE=$v"; fi
+  TI_ENV="$TI_ENV" ti_start "t-off-$v"
+  start="$dh_rc|$DH_OUT"
+  TI_ENV="$TI_ENV" ti_prompt "t-off-$v" 'ABC-77' '"source":"user"'
+  assert_eq "DHT5-switch-off-$v" "$start|$dh_rc|$DH_OUT" "0||0|"
+  if [ ! -e "$(BLOG "t-off-$v")" ]; then ok; else bad "DHT5-no-dir-$v" "BASE_SESSION_TITLE $v wrote under the log dir"; fi
+done
+unset TI_ENV
 
 before="$(find "$DH_HOME" "$DH/tmp" -name title.json 2>/dev/null | wc -l)"
 ti_start '../evil'

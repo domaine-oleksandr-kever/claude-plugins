@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.16.2**.
+Current release: **base v0.17.0**.
 
 ## Status
 
@@ -419,7 +419,7 @@ rest with `rm -rf`, because the engine's file API cannot delete.
   `base:figma-reader` or `base:doc-reader`. The deny reads `base: <agent> needs the slim plugin —
   claude plugin install slim@domaine`. It applies through the Agent tool and through any plugin's
   spawn. The writer and the reviewers run without slim.
-- **Session title** is `<KEY> — <summary>`, cut at 100 bytes. The summary comes from the
+- **Session title** is off unless `BASE_SESSION_TITLE=1`. On, the title is `<KEY> — <summary>`, cut at 100 bytes. The summary comes from the
   `# <KEY> — …` heading of `.claude/tasks/<KEY>/ticket.md`; without that heading, the title is the
   key alone. base takes the key from the branch's ticket key when the session starts and
   `.claude/tasks/` holds that key or another key of its project. Else base takes it from the first
@@ -590,7 +590,7 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `BASE_EDIT_MODEL` | from the login | `opus`, `sonnet` or `haiku` (any case, trimmed) forces the model the edit-delegation convention and the edit guard name; `0` drops both; any other value is read as unset (the doctor's `switches` row warns) |
 | `ANTHROPIC_API_KEY` | — | read, never set or printed, by `scripts/edit-delegation.cjs`: present while the login record has no `oauthAccount`, the session counts as an api-key session and delegation picks sonnet |
 | `BASE_FIGMA_SOURCE` | `auto` | `base:figma-reader`'s source ladder: `auto` tries the Figma MCPs, then the REST API; `mcp` never uses the token; `rest` skips the MCPs. Process environment only |
-| `BASE_SESSION_TITLE` | on | `0` leaves the session title to Claude Code; read by the title command hook (`hooks/title.cjs`) |
+| `BASE_SESSION_TITLE` | off | `1` turns the title command hook (`hooks/title.cjs`) on; off, the session title stays Claude Code's |
 | `BASE_TMP_TTL` | `24` | hours a file in `.claude/base-tmp` lives before the session sweep deletes it; `0` turns the sweep off |
 | `BASE_DOGFOOD` | off | `1` turns dogfood mode on, `0` turns it off for an account `dogfood.json` lists (Dogfood mode): the `dogfood` convention (the `start rules` and `SubagentStart` command hooks), the `plugin_defect` tool, the nudge and the one blocked stop after a failed plugin script (the `Stop` command hook), `/base-defects`, the doctor's `defects` row. Off, none of them exists |
 | `BASE_DOGFOOD_REPO` | the marketplace repo | `<owner>/<repo>` a `plugin_defect` call with `github: true` (or, where nothing draws, without `github: false`) files its issue in; unset, the github repo of the marketplace base was installed from (`known_marketplaces.json`), and without one the tool asks for this switch |

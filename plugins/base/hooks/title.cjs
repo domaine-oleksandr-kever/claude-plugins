@@ -6,7 +6,7 @@
  *   prompt  UserPromptSubmit: the most recent corroborated ticket a person's prompt names
  * One shot per session: <log dir>/<session>/title.json {sid, by, title?, ts} (log dir, else spare dir) ends it,
  * `by: 'user'` when the person had set a title. base's mod adopts it into base.events and base.jsonl.
- * BASE_SESSION_TITLE=0 turns it off. Always exits 0; an internal error prints nothing.
+ * Off by default: BASE_SESSION_TITLE=1 turns it on. Always exits 0; an internal error prints nothing.
  */
 'use strict';
 
@@ -120,7 +120,7 @@ function resolve(mode, input, cwd) {
 
 function main(argv) {
   const mode = argv[0];
-  if ((mode !== 'start' && mode !== 'prompt') || process.env.BASE_SESSION_TITLE === '0') return;
+  if ((mode !== 'start' && mode !== 'prompt') || process.env.BASE_SESSION_TITLE !== '1') return;
   const input = readStdin();
   const sid = input.session_id;
   const dirs = [logDir(sid), logDir(sid, true)].filter(Boolean);
