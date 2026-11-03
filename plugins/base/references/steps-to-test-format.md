@@ -15,7 +15,7 @@ One skeleton for every issue type: a Bug changes what item 3 holds, not the shap
 
 - [Template](steps-to-test/templates.md) — the four-item skeleton, and how a Bug fills it.
 - [Item-by-item rules](steps-to-test/item-rules.md) — theme, object, setup, edge cases, screenshots.
-- [Shape and size](steps-to-test/shape-and-size.md) — one list, one line per item, observable words, no
-  repetition, the word target, banned content.
+- [Shape and size](steps-to-test/shape-and-size.md) — one list, one line per item, examples as shapes and
+  every fact from a source, observable words, no repetition, the word target, banned content.
 - [Theme resolution (item 1)](steps-to-test/theme-resolution.md) — which theme item 1 names.
 - [Self-check before presenting](steps-to-test/self-check.md) — the checklist run before the draft is shown.

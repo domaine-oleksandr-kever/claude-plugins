@@ -50,7 +50,7 @@ item 3 data.
 
 - **Theme editor** — **Add section** / **Add block** by their editor names with the placement, every
   setting that must leave its default **by its label with its value** (an option by its **option label**,
-  a typed value with an `e.g.` that shows its shape: "plain numbers, one with pence, e.g. 40, 2.95"), the
+  a typed value with an `e.g.` that shows its shape: "whole and decimal amounts, e.g. 12, 4.50"), the
   content, then **Save**. A section the repo already ships on the template → "already on the `<template>`
   template — find it in the sidebar"; read that from the template JSON, never assume the QA theme's state.
 - **Data as properties** — every entity QA needs is a requirement list, never a handle, a title or "the
@@ -80,8 +80,8 @@ item 3 data.
   a CDN, an app cookie) is one bullet that names what it holds, where, and how QA empties it
   (`DevTools > Application > Storage > Clear site data`, or a wait longer than the TTL, in minutes), never a
   bare wait: "card HTML is cached in session storage for a minute: clear site data or wait over a minute before
-  each reload"; the TTL and the storage are read from the diff or `notes.md`, and one not read there is
-  `unconfirmed: data:` in the presentation.
+  each reload" (a shape: the storage and the TTL are read from the theme code — the helper the changed file
+  calls — the diff or `notes.md`, and one not read there is `unconfirmed: data:` in the presentation).
 - **Optional** — only setup that reaches an item 4 fact outside the Description and AC opens with `optional:`.
 - **Bug** — the admin / store / theme state that makes the defect reachable (data shape, viewport, market,
   setting value), as requirements, plus the state the fix keeps or limits; never the root cause or the fix. A

@@ -7,6 +7,13 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
 - **One ordered list, items 1–4**, numbered through. Nested bullets one level deep, under items 3 and 4
   only. No headings, tables, `✅` markers, accordion / expand blocks, troubleshooting or FAQ blocks — QA
   asks in the ticket.
+- **Examples are shapes, not facts.** Every quoted example in these references shows the shape of a
+  bullet; none of its facts (a storage, a duration, a filter, a count, a value, a label, a route, a page
+  kind) goes into the field unless a source of this ticket shows that fact.
+- **Every fact traces to a source** — the diff, the theme code the changed files call or import (read it —
+  grep the helper — before calling a fact unconfirmed), `{% schema %}` and locales, the ticket, linked docs,
+  `notes.md`, the developer's answers; a fact no source shows is written as the best reading of the sources
+  and listed as unconfirmed in the presentation, never as an example's value.
 - **Field-ready, no document meta** — no title, summary, revision history or rationale; no note to the developer,
   brief text or line meant for an agent.
 - **No repetition.** QA reads the Description and AC first: no feature summary, no AC paraphrase, no root

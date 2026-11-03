@@ -36,10 +36,13 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
 - Every item 4 line is a fact this change creates or changes — a boundary, a blank, a platform limit, a
   time-only state, an out-of-scope area, a field that changes, an unmentioned visible change "by design" —
   not a scenario, not an expected value and not behaviour nearby code already had.
+- Every fact in the field (a storage, a duration, a filter, a count, a value, a label, a route) traces to
+  a named source of this ticket; no sentence or clause is copied from an example in these references.
 - Every unverified admin label is written as the best admin-style label, never the code spelling, and is
   listed as unconfirmed in the presentation; every setup screenshot is asked for there as a `screenshot:`
   item.
 - Word count within 50–120 (a one-setting change may be 30), or over it only for setup item 3 needs.
 - No banned content: a walk-through, "You should see", an expected result, the PR's preview theme,
   absolute hosts outside item 1, passwords, deploy or CI mechanics, "works correctly", "or similar", a
-  hedge, a code identifier (a found fixture's quoted signature and "look first" excepted).
+  hedge, a code identifier (a found fixture's quoted signature and "look first" excepted), an example
+  sentence from these references.
