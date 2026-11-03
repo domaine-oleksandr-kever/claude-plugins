@@ -24,7 +24,7 @@ kept as given, and the conflict goes under `unconfirmed: theme:` in one line nam
 never self-contradictory ("UAT — <a prod store>"): it keeps the answer's environment and the theme name + id,
 and the disagreeing store name moves from the field into that unconfirmed line.
 
-**Link or route** — a confirmed id on a DEV or UAT store → the preview link; a Prod store or an unconfirmed
+**Link or route** — a confirmed id on a DEV or UAT store → the bare preview link; a Prod store or an unconfirmed
 id → `Online Store > Themes > <name> > Preview`, never a preview link.
 
 **Store with the placeholder theme** — named as the developer answered or as the ticket names it, with no

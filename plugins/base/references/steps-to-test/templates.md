@@ -6,7 +6,7 @@ One skeleton, feature and bug alike. Four items, numbered 1–4, in this order; 
 deep under items 3 and 4 only.
 
 ```markdown
-1. **Theme:** <environment: DEV / UAT / Prod> — <store>, theme **<name>** (<id>); <preview link or `Online Store > Themes > <name> > Preview`>. <Market / viewport / locale only when the change depends on it, with the breakpoint in px.>
+1. **Theme:** <environment: DEV / UAT / Prod> — <store>, theme **<name>** (<id>); <the bare preview link, or `Online Store > Themes > <name> > Preview`>. <Market / viewport / locale only when the change depends on it, with the breakpoint in px.>
 2. **Object:** <page by path, template name, section / block by its admin name, `Theme settings > <group>` — where the change lives>.
 3. **Setup:** <what QA has to configure to reach the change, in dependency order — store data → definitions → entries → theme settings → content>
    - <settings by label with their value (a theme-settings group's values too), `Add section` / `Add block` by editor name, then **Save**>;

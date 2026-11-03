@@ -12,7 +12,8 @@ admin text; without one, the best human label, listed as `unconfirmed: label:` n
 
 **1. Theme.** The environment (DEV / UAT / Prod), the store, the theme by label and id (order:
 `theme-resolution.md`), and the route that opens it: a confirmed id on a DEV or UAT store → the preview link
-`https://<store>.myshopify.com/?preview_theme_id=<id>`; a Prod store or an unconfirmed id →
+https://<store>.myshopify.com/?preview_theme_id=<id> as the bare URL, never in a code span or behind a label:
+a code span is not clickable in Jira; a Prod store or an unconfirmed id →
 `Online Store > Themes > <theme> > Preview`, never a preview link.
 Never the PR's own preview theme. With the placeholder theme, the store is named as the developer answered
 or as the ticket names it, with no host and no preview link (the route form instead); a multi-brand repo

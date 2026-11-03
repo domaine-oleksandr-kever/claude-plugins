@@ -1128,8 +1128,9 @@ for (const [label, adf] of ADF_CORPUS) {
 // ordered list of four items carrying bold labels and inline code, with nested bullets under items 3
 // and 4 only — one level deep, the only depth `references/steps-to-test-format.md` allows in the field.
 // A split list or a lost bullet reaches Jira as prose detached from its item.
+const STT_PREVIEW = 'https://sample.myshopify.com/?preview_theme_id=100000000001';
 const STT_FEATURE_MD = [
-  '1. **Theme:** DEV — sample store, theme **QA** (`100000000001`); preview: `/?preview_theme_id=100000000001`.',
+  '1. **Theme:** DEV — sample store, theme **QA** (`100000000001`); preview: https://sample.myshopify.com/?preview_theme_id=100000000001.',
   '2. **Object:** page `/pages/sample` — the **Sample block** section; the cart drawer **Delivery** row.',
   '3. **Setup:**',
   '  - Online Store > Themes > **QA** > **Customize** > **Page** > **Add section** > **Sample block**, **Heading** → `Sample heading`, then **Save**;',
@@ -1144,6 +1145,9 @@ const STT_FEATURE_MD = [
   check('stt-feature-one-ordered-list', adf.content.map((b) => b.type), ['orderedList']);
   const items = adf.content[0].content;
   check('stt-feature-item-count', items.length, 4);
+  // item 1: the bare preview link is a link mark (clickable in Jira); the closing '.' stays outside it
+  check('stt-feature-item1-preview-link', items[0].content[0].content.slice(-2),
+    [t(STT_PREVIEW, [mLink(STT_PREVIEW)]), t('.')]);
   // item 2: the bold label and the inline path on the item's own line, no nested list
   check('stt-feature-item2-children', items[1].content.map((b) => b.type), ['paragraph']);
   check('stt-feature-item2-label-and-code', items[1].content[0].content.slice(0, 3),
@@ -1160,10 +1164,10 @@ const STT_FEATURE_MD = [
       t('Settings > Custom data > Products > Add definition', [mCode]), t(');')]);
   check('stt-feature-item4-children', items[3].content.map((b) => b.type), ['paragraph', 'bulletList']);
   check('stt-feature-item4-bullets', items[3].content[1].content.length, 2);
-  // the whole document comes back byte-identical, the stored ADF is a fixpoint, and no delimiter
-  // survives as literal text in the field
+  // the whole document comes back byte-identical (the bare link in its canonical <url> form), the
+  // stored ADF is a fixpoint, and no delimiter survives as literal text in the field
   const md1 = noEOL(a2m(adf));
-  check('stt-feature-roundtrip-canonical', md1, STT_FEATURE_MD);
+  check('stt-feature-roundtrip-canonical', md1, STT_FEATURE_MD.replace(STT_PREVIEW, `<${STT_PREVIEW}>`));
   check('stt-feature-adf-stable', m2a(md1, ['--no-tables']), adf);
   check('stt-feature-no-leak', leakedText(adf), []);
 }
@@ -1172,7 +1176,7 @@ const STT_FEATURE_MD = [
 // defect reachable, and item 4 is a single line of clauses. Each requirement must reach Jira as its own
 // bullet under item 3, and a single-line item 4 must stay one paragraph with no empty list under it.
 const STT_BUG_MD = [
-  '1. **Theme:** UAT — sample store, theme **QA** (`100000000001`); preview: `/?preview_theme_id=100000000001`. Viewport under 1024px.',
+  '1. **Theme:** UAT — sample store, theme **QA** (`100000000001`); preview: https://sample.myshopify.com/?preview_theme_id=100000000001. Viewport under 1024px.',
   '2. **Object:** product cards in the **Collection grid** (`/collections/…`) and the **Search grid** (`/search?q=…`).',
   '3. **Setup:**',
   '  - **Banner:** an entry with **Mobile layout** → **Stacked** and both images set, then **Save**;',
@@ -1185,6 +1189,8 @@ const STT_BUG_MD = [
   check('stt-bug-one-ordered-list', adf.content.map((b) => b.type), ['orderedList']);
   const items = adf.content[0].content;
   check('stt-bug-item-count', items.length, 4);
+  check('stt-bug-item1-preview-link', items[0].content[0].content.slice(-2),
+    [t(STT_PREVIEW, [mLink(STT_PREVIEW)]), t('. Viewport under 1024px.')]);
   check('stt-bug-item3-children', items[2].content.map((b) => b.type), ['paragraph', 'bulletList']);
   check('stt-bug-item3-bullets', items[2].content[1].content.length, 3);
   // every requirement bullet opens with its bold label, and no bullet nests a second level
@@ -1198,7 +1204,7 @@ const STT_BUG_MD = [
   check('stt-bug-item4-label', items[3].content[0].content.slice(0, 2),
     [t('Edge cases / not obvious:', [mStrong]), t(' the sidebar ')]);
   const md1 = noEOL(a2m(adf));
-  check('stt-bug-roundtrip-canonical', md1, STT_BUG_MD);
+  check('stt-bug-roundtrip-canonical', md1, STT_BUG_MD.replace(STT_PREVIEW, `<${STT_PREVIEW}>`));
   check('stt-bug-adf-stable', m2a(md1, ['--no-tables']), adf);
   check('stt-bug-no-leak', leakedText(adf), []);
 }

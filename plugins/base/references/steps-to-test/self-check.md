@@ -7,7 +7,8 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
 - Item 1 names the environment, the store and a theme (ticket, developer's answer, or unconfirmed — never
   the PR's preview) and opens it; the store host and preview link appear there and nowhere else, and
   not at all with the placeholder theme, an unconfirmed id or a Prod store (route form instead); the
-  environment and the store never contradict each other.
+  preview link is bare (no code span, no label); the environment and the store never contradict each
+  other.
 - Item 2 names where the change lives — every page by path, the section / block by its admin label, every
   surface it reaches — and, for a change not visible on screen, the tool, panel and filter.
 - Everything the change adds or re-wires has its route and every non-default setting with its value by
