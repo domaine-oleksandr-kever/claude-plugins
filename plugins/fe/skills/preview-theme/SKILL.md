@@ -94,7 +94,10 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    store. Show the final name and `[ create / reuse existing / cancel ]`. Proceed only on
    explicit confirmation.
 4. **Create.** Run `create-preview-theme.sh create --name "<name>"` (add `--reuse` to
-   push into an existing same-named theme instead of making a new one). The script runs
+   push into an existing same-named theme instead of making a new one). The repo has
+   `multi-brand/brands/` → add `--brand <b>`. b is the directory there that matches the
+   `store=` from step 1 (e.g. `mac` for a MAC store), never a ticket's short code; unclear →
+   ask. Without it the script refuses to build (`error=brand_required`). The script runs
    `npm run build`, pushes the built code (settings ignored), then overlays the dev
    theme's settings — pass `--no-build` if the developer already built, or
    `--build-script <name>` when the production build is a different `package.json` script —
