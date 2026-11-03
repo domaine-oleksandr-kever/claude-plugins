@@ -5870,6 +5870,21 @@ dc_stt DC8zb-stt-wrapped-line "$STRAY" 's/^2\. \*\*Object:\*\* \(.*\)$/2. **Obje
 dc DC8zc-stt-image 1 'fail image in the field' file stt "$DCD/stt-img.md"
 grep -qF "$STRAY" "$DCD/out" && ok || bad DC8zc-stray "$(tr '\n' ';' < "$DCD/out")"
 dc_stt DC8zd-stt-details "fail accordion in the field" "${CART}   - <details><summary>Troubleshooting<\/summary>clear the cart<\/details>/"
+# DC8ze–DC8zm: the preview link is bare — a code span or a [label](url) is not clickable in Jira
+BARE='fail preview link not bare (a code span or [label](url) is not clickable in Jira)'
+THEME='s|^1\. \*\*Theme:\*\* .*|1. **Theme:** UAT — MAC `elc-us-mc-uat`, theme **develop** (156379611322); '
+dc_stt DC8ze-stt-backticked-preview-url "$BARE" "${THEME}"'`https://elc-us-mc-uat.myshopify.com/?preview_theme_id=156379611322`.|'
+dc_stt DC8zf-stt-labelled-preview-link "$BARE" "${THEME}"'[develop](https://elc-us-mc-uat.myshopify.com/?preview_theme_id=156379611322).|'
+sed 's|^1\. \*\*Theme:\*\* .*|1. **Theme:** UAT — MAC `elc-us-mc-uat`, theme **develop** (156379611322), https://elc-us-mc-uat.myshopify.com/?preview_theme_id=156379611322; Clinique `elc-us-cl-uat`, theme **develop** (156379611323), https://elc-us-cl-uat.myshopify.com/?preview_theme_id=156379611323.|' "$DCD/stt.md" > "$DCD/stt-bare.md"
+dc DC8zg-stt-bare-preview-two-stores 0 'result=ok' file stt "$DCD/stt-bare.md"
+sed "${THEME}"'`Online Store > Themes > develop > Preview`.|' "$DCD/stt.md" > "$DCD/stt-handle-store.md"
+dc DC8zh-stt-backticked-store-handle 0 'result=ok' file stt "$DCD/stt-handle-store.md"
+dc_stt DC8zi-stt-backticked-relative-preview "$BARE" "${THEME}"'preview: `/?preview_theme_id=156379611322`.|'
+dc_stt DC8zj-stt-backticked-noscheme-preview "$BARE" "${THEME}"'`elc-us-mc-uat.myshopify.com/?preview_theme_id=156379611322`.|'
+dc_stt DC8zk-stt-double-tick-preview "$BARE" "${THEME}"'``https://elc-us-mc-uat.myshopify.com/?preview_theme_id=156379611322``.|'
+dc_stt DC8zl-stt-labelled-noscheme-preview "$BARE" "${THEME}"'[develop](elc-us-mc-uat.myshopify.com/?preview_theme_id=156379611322).|'
+sed 's|^1\. \*\*Theme:\*\* .*|1. **Theme:** UAT — MAC store `https://elc-us-mc-uat.myshopify.com`, theme **develop** (156379611322), the `?preview_theme_id=` parameter; https://elc-us-mc-uat.myshopify.com/?preview_theme_id=156379611322.|' "$DCD/stt.md" > "$DCD/stt-host-code.md"
+dc DC8zm-stt-backticked-host-bare-preview 0 'result=ok' file stt "$DCD/stt-host-code.md"
 
 cat > "$DCD/pr.md" <<MD
 ## Summary

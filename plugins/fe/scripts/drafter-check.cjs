@@ -3,7 +3,8 @@
 // reads the draft. Prints counts and `ok`/`fail` lines only, never the checked text.
 //
 //   drafter-check.cjs file stt <path>            steps-to-test.md: the four items as one list; no expectation,
-//                                                old-format text or handle; words (fail over 160,
+//                                                old-format text or handle; the preview link bare (no
+//                                                code span, no [label](url)); words (fail over 160,
 //                                                warn=over-120-target above 120), attribution
 //   drafter-check.cjs file pr <path> [--no-preview]  pr-body.md: core skeleton, theme preview table
 //                                                (off with --no-preview when the notes.md beside it
@@ -57,6 +58,13 @@ const OLD_FORMAT = /handles are examples|why the bug happened|what was changed|w
 // or `e.g.` followed by a kebab-case word in backticks; the bare `/collections/…` placeholder is no handle
 const HANDLE = /\/(?:products|collections|pages|blogs)\/[A-Za-z0-9]|\be\.g\.,?\s*[`'"(]?\/|\be\.g\.,?\s*`[a-z0-9]+(?:-[a-z0-9]+)+`/i;
 
+// a preview link (`preview_theme_id=<digits>`, any host form) in a code span of any backtick run, or
+// behind a [label](url): neither is clickable in Jira; a store host or the bare parameter name may be code
+const CODE_SPAN = /(`+)(.+?)(?<!`)\1(?!`)/g;
+const PREVIEW_ID = /preview_theme_id=\d/i;
+const notBareLink = (l) => [...l.matchAll(CODE_SPAN)].some((m) => PREVIEW_ID.test(m[2]))
+  || /\[[^\]]*\]\([^)]*preview_theme_id/i.test(l);
+
 /** Words a reader reads: list markers and tokens with no letter or digit (`>`, `—`) are not words. */
 const wordCount = (lines) => lines
   .map((l) => l.replace(/^\s*(?:\d+\.|[-*+])\s+/, ''))
@@ -103,6 +111,7 @@ function checkStt(path) {
   if (lines.some((l) => EXPECTATION.test(l))) fails.push('expected result in the field ("should see", "Expected:", "verify")');
   if (lines.some((l) => OLD_FORMAT.test(l))) fails.push('old-format text in the field (handle substitution, Bug-template label, context item, "already set up")');
   if (lines.some((l) => HANDLE.test(l))) fails.push('catalog handle in the field (data as properties, never a handle)');
+  if (lines.some(notBareLink)) fails.push('preview link not bare (a code span or [label](url) is not clickable in Jira)');
   const words = wordCount(lines);
   if (words > STT_MAX_WORDS) fails.push(`over ${STT_MAX_WORDS} words (${words})`);
   const hits = attributionHits(text);
