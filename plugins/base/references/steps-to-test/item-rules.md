@@ -33,7 +33,9 @@ group by its route (`Theme settings > <group>`; its values are item 3 bullets), 
 reaches (a card in two grids, the cart drawer row); three or more surfaces are grouped by page type
 ("collection and product pages"), not listed one by one. **Not visible on screen** — a change in a request, response, dataLayer, cookie or console
 message: name the tool, the panel and the filter (`DevTools > Network, filter "cart", request
-/cart/update.js`); the expected value stays out (it is the AC).
+/cart/update.js`); every `DevTools > Network` mention in the field names its filter (`filter Fetch/XHR` for a
+feed or API response, `Img` for image downloads, `Doc` for the page), and an item 3 source that sits under
+another filter than item 2's names its own; the expected value stays out (it is the AC).
 
 **3. Setup.** What QA has to configure to reach the change, in dependency order: store / market settings →
 metafield and metaobject definitions → entries → values → theme settings → content. One bullet per
@@ -41,7 +43,8 @@ action or per entity; everything the change adds or re-wires has its route and i
 Item 3 makes reachable every state the Description or AC claims — the fixed state and every state the change
 deliberately keeps or limits ("trimming still happens under a size filter"); a kept state gets its setup
 bullet like an added one. Admin, store and theme state only: what the shopper does on the storefront while
-testing (a filter chosen, a search term typed, a cart below a threshold) is not a setup bullet — when it
+testing (a filter chosen, a search term typed, a cart below a threshold) is not a setup bullet (a cache in
+the way's clear route excepted) — when it
 conditions the behaviour it is an item 4 fact; the data it needs (a product the search term returns) stays
 item 3 data.
 
@@ -63,8 +66,8 @@ item 3 data.
   shows it after the change (the feed response in Network, the DOM, an admin field), quoting the key or value
   the source shows in a code span, never the symptom the change removes; where to look first (the page type or
   collection kind the ticket or `notes.md` names); and that the source decides whether a page holds one. A
-  finding recipe is setup, not a walk-through: "an affected card: in the feed response (DevTools > Network, the
-  request the cards come from), a placeholder image and a first image with the same file name and a different
+  finding recipe is setup, not a walk-through: "an affected card: in the feed response (DevTools > Network, filter
+  Fetch/XHR, the request the cards come from), a placeholder image and a first image with the same file name and a different
   `?v=`; try a collection of 20+ fed cards, best-sellers first; the feed decides which collections hold one".
 - **Created by QA** — an entity that exists only once QA makes it (a discount, an issued gift card, an
   entry) is named by its role, with where its value appears.
@@ -73,6 +76,12 @@ item 3 data.
 - **Hiding state** — a store state that would hide or override the change (an active promotion or
   free-shipping offer, an app override, a feature flag, a cookie / consent state) is named as a requirement
   that it be absent or present ("no active free-delivery offer").
+- **Cache in the way** — a cache between QA and the change (card HTML kept in session storage for a minute,
+  a CDN, an app cookie) is one bullet that names what it holds, where, and how QA empties it
+  (`DevTools > Application > Storage > Clear site data`, or a wait longer than the TTL, in minutes), never a
+  bare wait: "card HTML is cached in session storage for a minute: clear site data or wait over a minute before
+  each reload"; the TTL and the storage are read from the diff or `notes.md`, and one not read there is
+  `unconfirmed: data:` in the presentation.
 - **Optional** — only setup that reaches an item 4 fact outside the Description and AC opens with `optional:`.
 - **Bug** — the admin / store / theme state that makes the defect reachable (data shape, viewport, market,
   setting value), as requirements, plus the state the fix keeps or limits; never the root cause or the fix. A

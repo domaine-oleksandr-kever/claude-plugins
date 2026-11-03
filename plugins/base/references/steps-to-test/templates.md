@@ -12,6 +12,7 @@ deep under items 3 and 4 only.
    - <settings by label with their value (a theme-settings group's values too), `Add section` / `Add block` by editor name, then **Save**>;
    - <data QA needs, as properties: "a product with 3+ sizes where 1 size is sold out">;
    - <a found fixture: its signature in the source that keeps it, where to look first>;
+   - <a cache in the way: what it holds, where, how QA empties it>;
    - <store-wide mutation → its restore in the same bullet>.
 4. **Edge cases / not obvious:** <boundaries, blank values, platform limits stated as not a bug, states only time reaches, what is intentionally out of this ticket — one clause each>.
 ```

@@ -10,11 +10,13 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   preview link is bare (no code span, no label); the environment and the store never contradict each
   other.
 - Item 2 names where the change lives — every page by path, the section / block by its admin label, every
-  surface it reaches — and, for a change not visible on screen, the tool, panel and filter.
+  surface it reaches — and, for a change not visible on screen, the tool, panel and filter, every
+  `DevTools > Network` mention with its filter.
 - Everything the change adds or re-wires has its route and every non-default setting with its value by
   label in item 3, in dependency order; a theme-editor recipe ends with **Save**.
 - Every state the Description or AC claims — fixed, kept or limited — has its setup in item 3, without
-  `optional:`; item 3 holds no storefront action (a filter chosen, a term typed, a cart filled).
+  `optional:`; item 3 holds no storefront action (a filter chosen, a term typed, a cart filled), a cache in
+  the way's clear route excepted.
 - Every data need in item 3 is a property list whose counts and values make the changed behaviour
   distinguishable from the unchanged one; a metafield value uses the entry's `Metafields` route; zero catalog handles, titles or "the page that is already
   set up" anywhere in the field (a path in item 2 is a page type); an entity QA creates is named by its
@@ -24,6 +26,8 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
 - An entity QA cannot configure (a feed, a third-party service, time) has a finding recipe in item 3: its
   signature in a source that still shows it after the change, never the symptom the change removes, where to
   look first, and that the source decides; item 4 says a page with none is not a failed test.
+- A cache between QA and the change names what it holds, where, and how QA empties it (clear site data or a
+  wait past its TTL), never a bare wait.
 - A store state that would hide or override the change (an active offer, an app override, a feature flag,
   a cookie / consent state) is named in item 3 as required absent or present.
 - Nothing restated from the Description or AC: compare each sentence against the workspace `ticket.md`
