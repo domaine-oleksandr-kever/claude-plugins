@@ -5999,6 +5999,33 @@ written: /repo/.claude/tasks/ELC-1/steps-to-test.md
 unconfirmed: []
 report: 4 items, 2 setup bullets, 4 edge cases, 108 words $SENT
 TXT
+# DC22b–DC22e: a ticket with no AC — the stt receipt carries ac: empty with a one-line ac_proposal, never one without the other
+dc DC22b-receipt-ac-proposal 0 'result=ok' receipt stt <<TXT
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+unconfirmed: []
+ac: empty
+ac_proposal: each card image downloads once in DevTools > Network on the preview theme $SENT
+report: 4 items, 2 setup bullets, 2 edge cases, 90 words
+TXT
+dc DC22c-receipt-ac-empty-no-proposal 1 'fail ac_proposal empty with ac: empty' receipt stt <<'TXT'
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+unconfirmed: []
+ac: empty
+report: r
+TXT
+dc DC22d-receipt-proposal-without-ac-empty 1 'fail ac_proposal without ac: empty' receipt stt <<'TXT'
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+unconfirmed: []
+ac_proposal: each card image downloads once
+report: r
+TXT
+dc DC22e-receipt-ac-proposal-blank 1 'fail ac_proposal empty with ac: empty' receipt stt <<'TXT'
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+unconfirmed: []
+ac: empty
+ac_proposal:
+report: r
+TXT
 dc DC23-receipt-pr-no-title 1 'fail title empty' receipt pr <<'TXT'
 written: /repo/.claude/tasks/ELC-1/pr-body.md
 pr_summary: |

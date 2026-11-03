@@ -103,6 +103,7 @@ Each SendMessage turn keeps this contract.
       - data: <the property as written> — <inferred from <file>, not confirmed>
       - screenshot: item 3 — <the route or setting not obvious from text>; attach it by hand after item 4 with a one-line caption
     ac: empty
+    ac_proposal: <with `ac: empty`: one AC line from the Description, a pass criterion QA checks on the preview theme alone, observable, no "before"; for the developer to hand to the TL, never in the field>
     report: <one line: N setup bullets, N edge cases, N words>
 
 `ac: empty` only when the ticket has no AC. `unconfirmed: []` when there is nothing. A `screenshot:` item is setup only, never a result. Failure:

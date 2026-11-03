@@ -11,7 +11,8 @@
 //                                                records 'preview-decision: no preview'), None/N/A,
 //                                                Summary, attribution
 //   drafter-check.cjs file jira <path>           jira-comment.md: PR line, bulleted brief, no preview link, attribution
-//   drafter-check.cjs receipt stt|pr|jira        the drafter's reply on stdin: one kind, no empty field
+//   drafter-check.cjs receipt stt|pr|jira        the drafter's reply on stdin: one kind, no empty field;
+//                                                stt: `ac: empty` and a non-empty `ac_proposal:` come together
 //
 // First stdout line: result=ok|fail. Exit 0 ok, 1 fail, 2 usage.
 'use strict';
@@ -290,6 +291,11 @@ function checkReceipt(kind, text) {
     if (!p.startsWith('/') || !p.endsWith(want)) fails.push(`written is not an absolute path ending in ${want}`);
     if (field(lines, 'unconfirmed') === null) fails.push('unconfirmed missing');
     if (!field(lines, 'report')) fails.push('report empty');
+    if (kind === 'stt') {
+      const proposal = field(lines, 'ac_proposal');
+      if (field(lines, 'ac') === 'empty') { if (!proposal) fails.push('ac_proposal empty with ac: empty'); }
+      else if (proposal !== null) fails.push('ac_proposal without ac: empty');
+    }
     if (kind === 'pr') {
       if (!field(lines, 'title')) fails.push('title empty');
       if (!field(lines, 'pr_summary')) fails.push('pr_summary empty');
