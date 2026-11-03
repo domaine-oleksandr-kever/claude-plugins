@@ -5885,6 +5885,14 @@ dc_stt DC8zk-stt-double-tick-preview "$BARE" "${THEME}"'``https://elc-us-mc-uat.
 dc_stt DC8zl-stt-labelled-noscheme-preview "$BARE" "${THEME}"'[develop](elc-us-mc-uat.myshopify.com/?preview_theme_id=156379611322).|'
 sed 's|^1\. \*\*Theme:\*\* .*|1. **Theme:** UAT — MAC store `https://elc-us-mc-uat.myshopify.com`, theme **develop** (156379611322), the `?preview_theme_id=` parameter; https://elc-us-mc-uat.myshopify.com/?preview_theme_id=156379611322.|' "$DCD/stt.md" > "$DCD/stt-host-code.md"
 dc DC8zm-stt-backticked-host-bare-preview 0 'result=ok' file stt "$DCD/stt-host-code.md"
+# DC8zn–DC8zp: every DevTools > Network mention names its filter; "network-level" is no mention
+NET='fail Network without its filter'
+sed 's|^2\. \*\*Object:\*\* .*|2. **Object:** collection pages; not visible: DevTools > Network, filter **Img**.|' "$DCD/stt.md" > "$DCD/stt-net.md"
+dc DC8zn-stt-network-with-filter 0 'result=ok' file stt "$DCD/stt-net.md"
+dc_stt DC8zo-stt-network-no-filter "$NET" "${CART}   - an affected card: in the feed response (DevTools > Network, the request the cards come from)./"
+sed 's|^4\. \*\*Edge cases / not obvious:\*\*|4. **Edge cases / not obvious:** a network-level fix;|' "$DCD/stt.md" > "$DCD/stt-netlevel.md"
+dc DC8zp-stt-network-level-no-mention 0 'result=ok' file stt "$DCD/stt-netlevel.md"
+grep -qF "$NET" "$DCD/out" && bad DC8zp-no-net-fail "$(tr '\n' ';' < "$DCD/out")" || ok
 
 cat > "$DCD/pr.md" <<MD
 ## Summary

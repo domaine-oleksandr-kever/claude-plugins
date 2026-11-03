@@ -4,7 +4,8 @@
 //
 //   drafter-check.cjs file stt <path>            steps-to-test.md: the four items as one list; no expectation,
 //                                                old-format text or handle; the preview link bare (no
-//                                                code span, no [label](url)); words (fail over 160,
+//                                                code span, no [label](url)); every DevTools > Network
+//                                                mention names its filter; words (fail over 160,
 //                                                warn=over-120-target above 120), attribution
 //   drafter-check.cjs file pr <path> [--no-preview]  pr-body.md: core skeleton, theme preview table
 //                                                (off with --no-preview when the notes.md beside it
@@ -113,6 +114,7 @@ function checkStt(path) {
   if (lines.some((l) => OLD_FORMAT.test(l))) fails.push('old-format text in the field (handle substitution, Bug-template label, context item, "already set up")');
   if (lines.some((l) => HANDLE.test(l))) fails.push('catalog handle in the field (data as properties, never a handle)');
   if (lines.some(notBareLink)) fails.push('preview link not bare (a code span or [label](url) is not clickable in Jira)');
+  if (lines.some((l) => /\bNetwork\b/.test(l) && !/\bfilter\b/i.test(l))) fails.push('Network without its filter (every DevTools > Network mention names filter Fetch/XHR, Img, Doc …)');
   const words = wordCount(lines);
   if (words > STT_MAX_WORDS) fails.push(`over ${STT_MAX_WORDS} words (${words})`);
   const hits = attributionHits(text);
