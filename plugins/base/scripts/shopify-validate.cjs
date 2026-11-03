@@ -139,13 +139,15 @@ function run(opts, content, retried) {
     done = true;
     clearTimeout(timer);
     fn();
+    if (serverUp) {
+      try {
+        if (win) child.kill();
+        else process.kill(-child.pid, 'SIGKILL');
+      } catch (_) {}
+    }
     try { child.stdin.destroy(); } catch (_) {}
     try { child.stdout.destroy(); } catch (_) {}
-    if (!serverUp) return child.unref();
-    try {
-      if (win) child.kill();
-      else process.kill(-child.pid, 'SIGKILL');
-    } catch (_) {}
+    if (!serverUp) child.unref();
   };
   const timer = setTimeout(() => finish(() => unavailable('timeout', 'seconds=' + opts.timeout + (serverUp ? '' : ' phase=install'))), opts.timeout * 1000);
 

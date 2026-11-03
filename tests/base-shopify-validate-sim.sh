@@ -173,9 +173,11 @@ else bad V10d-cache-reset-once "$(show) rec=$(tr '\n' ';' < "$REC" | head -c 300
 # V11: a server that answered and then stalls is abandoned at --timeout, and killed
 start=$SECONDS
 SV_FAKE=stall sv --code 'query { shop { name } }' --timeout 1
-if [ "$rc" -eq 3 ] && grep -q '^error=timeout seconds=1$' "$E" && dead && [ "$(recq 'r.some(x => x.eof)')" = false ] \
+v11dead=false; for _ in 1 2 3 4 5 6 7 8 9 10; do dead && { v11dead=true; break; }; sleep 0.2; done
+v11eof="$(recq 'r.some(x => x.eof)')"
+if [ "$rc" -eq 3 ] && grep -q '^error=timeout seconds=1$' "$E" && [ "$v11dead" = true ] && [ "$v11eof" = false ] \
    && [ $((SECONDS - start)) -lt 10 ]; then ok
-else bad V11-timeout "$(show) seconds=$((SECONDS - start))"; fi
+else bad V11-timeout "$(show) seconds=$((SECONDS - start)) dead=$v11dead eof=$v11eof"; fi
 
 # V11b: npx silent at --timeout (still installing) is never killed: stdin closes and it ends on EOF
 start=$SECONDS
