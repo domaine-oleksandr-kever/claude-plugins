@@ -276,6 +276,31 @@ describe('draft read guard', () => {
       expect(shellReadsDraft(c)).toBe(false)
   })
 
+  test('a pipeline through the checker: a printf/echo receipt before it is sanctioned, a draft read before or after it is not', async () => {
+    const K = '.claude/tasks/ELC-1767/steps-to-test.md'
+    const C = 'node /fe/scripts/drafter-check.cjs'
+    for (const c of [`printf 'written: ${K}' | ${C} receipt stt | head -1; ${C} file stt ${K} | head -3`, `echo "written: ${K}" | ${C} receipt stt`,
+      `printf 'report: \`x\` > y\\nwritten: ${K}' | ${C} receipt stt`, `${C} receipt jira <<'TXT'\nwritten: ${K}\nTXT`])
+      expect(shellReadsDraft(c)).toBe(false)
+    for (const c of [`cat ${K} | head`, `${C} file stt ${K} | cat ${K}`, `printf x | ${C} receipt stt | grep x ${K}`,
+      `cat ${K} >&2 | ${C} receipt stt`, `cat ${K} 1>&2 | ${C} receipt jira | head -1`, `cat ${K} | tee /dev/stderr | ${C} receipt jira`,
+      `cat ${K} |& ${C} receipt jira`, `cat ${K} | tee /tmp/x | ${C} receipt jira; cat /tmp/x`, `cat <${K} | ${C} receipt jira`,
+      `cat ${K} | ${C} file stt | head -1`, `printf 'written: ${K}' >&2 | ${C} receipt stt`,
+      `echo "$(cat ${K})" > /dev/stderr | ${C} receipt stt`, `echo "\`cat ${K}\`" > /tmp/x | ${C} receipt stt`])
+      expect(shellReadsDraft(c)).toBe(true)
+  })
+
+  test('a write to a draft path is no read; a read of the draft, whatever the output goes to, is', async () => {
+    const J = '.claude/tasks/ELC-1812/jira-comment.md'
+    for (const c of [`cat > ${J} <<'EOF'\nThe fix ships in PR #12.\nEOF`, `printf 'x\\n' > ${J}`, `echo x >> "${J}"`, `printf x | tee ${J}`,
+      `printf x | tee -a ${J} >/dev/null`, `W=/repo/.claude/tasks/ABC-1; cat > "$W/pr-body.md" <<EOF\nbody\nEOF`,
+      `cat >| ${J} <<'EOF'\nbody\nEOF`, `printf x | tee -- ${J}`, `printf x | tee --append ${J} >/dev/null`])
+      expect(shellReadsDraft(c)).toBe(false)
+    for (const c of [`cat ${J}`, `sed -n 1,5p ${J}`, `grep x ${J}`, `cat ${J} > /tmp/x`, `cat ${J} > /dev/null`, `cp ${J} /tmp/x`, `wc -l < ${J}`,
+      `cat ${J} >> ${J}`, `cat >/tmp/x<${J}`, `echo "$(cat ${J})" > ${J}`, `cat > ${J} <<'EOF'\nx\nEOF\ncat ${J}`])
+      expect(shellReadsDraft(c)).toBe(true)
+  })
+
   test('a draft path in a shell variable: the assignment is no read, a later use is matched with the value', async () => {
     const P = 'P=.claude/tasks/ELC-1217/pr-body.md'
     for (const c of [`${P}; node /fe/scripts/drafter-check.cjs file pr "$P" | head -2 && gh pr create --title t --body-file "$P"`,
@@ -347,5 +372,10 @@ describe('draft read guard', () => {
     expect((await bash($, `printf 'written: ${TASKS}/ABC-1/jira-comment.md\\nunconfirmed: []\\n' | node /fe/scripts/drafter-check.cjs receipt jira`)).deny).toBeUndefined()
     expect((await bash($, `node /fe/scripts/drafter-check.cjs receipt jira <<TXT\n${R}\nTXT\ncat ${TASKS}/ABC-1/jira-comment.md`)).deny).toBeDefined()
     expect((await edits($)).refused).toBe(1)
+    const K = '.claude/tasks/ELC-1767/steps-to-test.md'
+    expect((await bash($, `printf 'written: ${K}' | node /fe/scripts/drafter-check.cjs receipt stt | head -1; node /fe/scripts/drafter-check.cjs file stt ${K} | head -3`)).deny).toBeUndefined()
+    expect((await bash($, `cat > .claude/tasks/ELC-1812/jira-comment.md <<'EOF'\nThe fix ships in PR #12.\nEOF`)).deny).toBeUndefined()
+    expect((await bash($, `cat .claude/tasks/ELC-1812/jira-comment.md > /dev/null`)).deny).toBeDefined()
+    expect((await edits($)).refused).toBe(2)
   })
 })

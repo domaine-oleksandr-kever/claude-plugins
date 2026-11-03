@@ -3,8 +3,9 @@
 // main-loop Bash command that recognisably writes such a file is counted, never refused. Escapes: the session already on
 // X or cheaper, `/base-edit-direct` for this session id, BASE_GUARD=0. No marker or no `edit.model` = no edit guard, no
 // count. Apart from that, whenever base runs: a main-loop read of a drafter's draft (`.claude/tasks/<id>/steps-to-test.md`,
-// `pr-body.md`, `jira-comment.md`: Read, Grep, slim view, or a Bash command naming one outside drafter-check /
-// gh --body-file / test / ls) is refused on any model; only BASE_GUARD=0 lifts it.
+// `pr-body.md`, `jira-comment.md`: Read, Grep, slim view, or a Bash command naming one outside drafter-check, a
+// printf/echo receipt piped into it, gh --body-file, test, ls or a write to it) is refused on any model; only
+// BASE_GUARD=0 lifts it.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent, BaseEventKind, BaseMainEdits } from '../../../types'
@@ -32,6 +33,10 @@ const DRAFT_ARG = /(?:\.claude\/tasks\/[^\s'"/]+|\$\{?\w+\}?)\/(?:steps-to-test|
 // the sanctioned consumers of a draft path: the checker, gh's --body-file, an existence test, a listing
 const DRAFT_OK = /drafter-check\.cjs\b|\bgh\s+pr\s+(?:create|edit)\b[^\n]*--body-file|^\s*(?:test|\[)\s+-[sef]\s|^\s*ls\b/
 const CHECKER = /drafter-check\.cjs\b/
+// a drafter's receipt piped into the checker: a printf/echo that cannot print the draft (no substitution) or copy it aside
+const RECEIPT = (seg: string) => /^\s*(?:printf|echo)\b/.test(seg) && !/>&|\btee\b|\$\(|`/.test(seg.replace(/'[^']*'/g, "''"))
+// a draft as the target of a write (`> path`, `>> path`, `>| path`, `tee [-a] path`): its text never reaches the session
+const DRAFT_WRITE = new RegExp(String.raw`(?:(?<!<)>[>|]?|\btee(?:\s+-[-\w]+)*)\s*(['"]?)[^\s'"<>]*${DRAFT_ARG.source}\1`, 'g')
 // a segment that only assigns variables (`P=<draft>`, `export P="$W/pr-body.md"`); a `$(…)` or backtick value runs a command
 const VALUE = String.raw`(?:"(?:[^"\`$]|\$(?!\())*"|'[^']*'|(?:[^\s'"\`$;|&]|\$(?!\())*)`
 const ASSIGN_ONLY = new RegExp(String.raw`^\s*(?:(?:export|local|declare|readonly)\s+)?\w+=${VALUE}(?:\s+\w+=${VALUE})*\s*$`)
@@ -49,7 +54,8 @@ export const editRefusal = (model: string) =>
 
 export const draftRefusal = (rel: string) =>
   `base drafter rule: ${rel} is a drafter agent's draft — never read, quote or paraphrase it. Show its path; a change ` +
-  `goes to the same agent via SendMessage, and jira-writer / gh pr create --body-file take the path. Refused on ` +
+  `goes to the same agent via SendMessage, and jira-writer / gh pr create --body-file take the path; writing your own ` +
+  `approved text to it (\`cat > path <<'EOF'\`) is no read. Refused on ` +
   `any model and after /base-edit-direct too; only BASE_GUARD=0 lifts it.`
 
 const mainEdits = atom({ plugin: 'base', key: 'mainEdits' } as const, null as BaseMainEdits | null)
@@ -133,11 +139,9 @@ export function shellReadsDraft(command: string): boolean {
       for (const [, name, value] of raw.matchAll(ASSIGN)) vars.set(name, expand(value.replace(/^(['"])(.*)\1$/, '$2')))
       return false
     }
-    const cmd = expand(raw)
-    const stages = cmd.split('|')
-    // a pipeline into the checker: it prints counts only (a drafter's receipt piped in)
-    if (CHECKER.test(stages[stages.length - 1])) return false
-    return stages.some(seg => DRAFT_ARG.test(seg) && !DRAFT_OK.test(seg))
+    const stages = expand(raw).split(/(?<!>)\|&?/)
+    const last = stages.map(seg => CHECKER.test(seg)).lastIndexOf(true)
+    return stages.some((seg, i) => DRAFT_ARG.test(seg.replace(DRAFT_WRITE, '')) && !DRAFT_OK.test(seg) && !(i < last && RECEIPT(seg)))
   })
 }
 
