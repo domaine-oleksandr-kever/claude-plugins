@@ -15,11 +15,14 @@ admin text; without one, the best human label, listed as `unconfirmed: label:` n
 https://<store>.myshopify.com/?preview_theme_id=<id> as the bare URL, never in a code span or behind a label:
 a code span is not clickable in Jira; a Prod store or an unconfirmed id →
 `Online Store > Themes > <theme> > Preview`, never a preview link.
-Never the PR's own preview theme. With the placeholder theme, the store is named as the developer answered
-or as the ticket names it, with no host and no preview link (the route form instead); a multi-brand repo
-with neither lists the store as unconfirmed. Market / viewport / locale / customer state only when the change
-depends on them — a viewport-dependent change names the breakpoint in px ("under 1024px" / "1024px and
-up"), never "mobile" alone. When `notes.md`, the ticket or the diff says a nearby environment cannot reach the
+Never the PR's own preview theme, never Prod or another store as a "before", and a theme without the change
+only when the ticket or the developer's answer names it (`theme-resolution.md` → **Before state**). With the
+placeholder theme, the store is named as the developer answered or as the ticket names it, with no host and
+no preview link (the route form instead); a multi-brand repo with neither lists the store as unconfirmed.
+Market / viewport / locale / customer state / browser or device only when the change depends on them — a
+browser or device when the TA, the diff or `notes.md` says so (the timing of a request, a Safari-only API); a
+viewport-dependent change names the breakpoint in px ("under 1024px" / "1024px and up"), never "mobile" alone.
+When `notes.md`, the ticket or the diff says a nearby environment cannot reach the
 change (a facet, app, market or setting absent there), one clause says so ("Not UAT: it has no **Size** filter"). No storefront passwords, no deploy or CI mechanics (workflows, pushes,
 tags, PR links); naming the branch a theme receives ("the theme the TL deploys `develop` to") is allowed.
 
@@ -55,6 +58,14 @@ item 3 data.
   `unconfirmed: data:` in the presentation. A definition is named by owner · **Name** ·
   type and its route `Settings > Custom data > <owner> > Add definition`; a value on an entry by
   `<Owner> > <entry> > Metafields` (`Collections > <the collection> > Metafields`), never the definition route.
+- **Found, not configured** — an entity whose existence depends on data QA cannot set (a product feed, a
+  third-party service, analytics, a CDN, time) gets a recipe to find one: its signature in a source that still
+  shows it after the change (the feed response in Network, the DOM, an admin field), quoting the key or value
+  the source shows in a code span, never the symptom the change removes; where to look first (the page type or
+  collection kind the ticket or `notes.md` names); and that the source decides whether a page holds one. A
+  finding recipe is setup, not a walk-through: "an affected card: in the feed response (DevTools > Network, the
+  request the cards come from), a placeholder image and a first image with the same file name and a different
+  `?v=`; try a collection of 20+ fed cards, best-sellers first; the feed decides which collections hold one".
 - **Created by QA** — an entity that exists only once QA makes it (a discount, an issued gift card, an
   entry) is named by its role, with where its value appears.
 - **Store-wide mutation** — closed in the same bullet by its restore ("clear it afterwards if you set it",
@@ -76,7 +87,8 @@ appears only the next calendar day`); what is intentionally out of this ticket; 
 like a defect; a visible change in the diff the Description does not mention (a moved element, a restyled
 control), stated as a fact with "by design" — the one "what changed" allowed; with no AC, a by-design
 difference QA would otherwise file (£40 in one place, £40.00 in another); for an off-screen change, the
-field that changes — never its value. Never a scenario
+field that changes — never its value; with a found fixture in item 3, "a page with none of these today is not
+a failed test". Never a scenario
 ("open X, click Y"), never an expected result the AC already states. Either one line of clauses separated
 by semicolons on the item's own line, or nested bullets, one fact each.
 

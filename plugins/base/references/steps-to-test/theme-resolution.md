@@ -24,6 +24,11 @@ kept as given, and the conflict goes under `unconfirmed: theme:` in one line nam
 never self-contradictory ("UAT — <a prod store>"): it keeps the answer's environment and the theme name + id,
 and the disagreeing store name moves from the field into that unconfirmed line.
 
+**Before state** — the field never invents a before for QA to compare with. Prod or another store is never a
+"before": other products, another feed, another cache. A theme without the change on the same store goes into
+item 1, as the before, only when the ticket or the developer's answer names it — never invented, never the PR's
+preview. Otherwise the before record is the PR's screenshots; QA reaches them through the PR-link comment.
+
 **Link or route** — a confirmed id on a DEV or UAT store → the bare preview link; a Prod store or an unconfirmed
 id → `Online Store > Themes > <name> > Preview`, never a preview link.
 

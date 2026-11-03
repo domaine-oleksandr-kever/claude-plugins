@@ -19,6 +19,11 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   distinguishable from the unchanged one; a metafield value uses the entry's `Metafields` route; zero catalog handles, titles or "the page that is already
   set up" anywhere in the field (a path in item 2 is a page type); an entity QA creates is named by its
   role; every store-wide mutation carries its restore.
+- No invented before: no Prod or other store as a "before"; a theme without the change only when the ticket
+  or the developer's answer names it.
+- An entity QA cannot configure (a feed, a third-party service, time) has a finding recipe in item 3: its
+  signature in a source that still shows it after the change, never the symptom the change removes, where to
+  look first, and that the source decides; item 4 says a page with none is not a failed test.
 - A store state that would hide or override the change (an active offer, an app override, a feature flag,
   a cookie / consent state) is named in item 3 as required absent or present.
 - Nothing restated from the Description or AC: compare each sentence against the workspace `ticket.md`
@@ -33,4 +38,4 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
 - Word count within 50–120 (a one-setting change may be 30), or over it only for setup item 3 needs.
 - No banned content: a walk-through, "You should see", an expected result, the PR's preview theme,
   absolute hosts outside item 1, passwords, deploy or CI mechanics, "works correctly", "or similar", a
-  hedge, a code identifier.
+  hedge, a code identifier (a found fixture's quoted signature and "look first" excepted).
