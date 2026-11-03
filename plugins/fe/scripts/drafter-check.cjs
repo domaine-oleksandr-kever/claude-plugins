@@ -2,11 +2,13 @@
 // drafter-check.cjs — checks a drafter's file and its receipt in code, so the main session never
 // reads the draft. Prints counts and `ok`/`fail` lines only, never the checked text.
 //
-//   drafter-check.cjs file stt <path>            steps-to-test.md: the four items as one list; no expectation,
-//                                                old-format text or handle; the preview link bare (no
-//                                                code span, no [label](url)); every DevTools > Network
-//                                                mention names its filter; words (fail over 160,
-//                                                warn=over-120-target above 120), attribution
+//   drafter-check.cjs file stt <path> [--refs <dir>]  steps-to-test.md: the four items as one list; no
+//                                                expectation, old-format text or handle; the preview link
+//                                                bare (no code span, no [label](url)); every DevTools >
+//                                                Network mention names its filter; words (fail over 160,
+//                                                warn=over-120-target above 120), attribution; with --refs
+//                                                (base references/steps-to-test), no 8-word run of a
+//                                                quoted reference example of 8+ words
 //   drafter-check.cjs file pr <path> [--no-preview]  pr-body.md: core skeleton, theme preview table
 //                                                (off with --no-preview when the notes.md beside it
 //                                                records 'preview-decision: no preview'), None/N/A,
@@ -20,7 +22,7 @@
 const fs = require('fs');
 const nodePath = require('path');
 
-const USAGE = `usage: drafter-check.cjs file stt <path>
+const USAGE = `usage: drafter-check.cjs file stt <path> [--refs <dir>]
        drafter-check.cjs file pr <path> [--no-preview]   (--theme: accepted, no-op)
        drafter-check.cjs file jira <path>
        drafter-check.cjs receipt stt|pr|jira   (the drafter's reply on stdin)
@@ -28,6 +30,8 @@ The pr check requires the Theme preview table; --no-preview turns that off only 
 beside the checked file holds a 'preview-decision: no preview' line (the developer's recorded
 answer) — else the table is still required. Prints no_preview=recorded|unrecorded|off.
 The stt check fails over 160 words and prints warn=over-120-target from 121 to 160 (still ok).
+--refs <dir> (an existing dir of *.md) fails a field holding 8 consecutive words of a "quoted" example
+of 8+ words from those files; prints examples=<n checked>, else examples=skipped.
 Prints result=ok|fail, counts and one 'fail <check>' line per defect — never the checked text.
 Exit 0 ok, 1 fail, 2 usage.`;
 
@@ -72,11 +76,39 @@ const wordCount = (lines) => lines
   .map((l) => l.replace(/^\s*(?:\d+\.|[-*+])\s+/, ''))
   .join(' ').split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 
+// a reference example: a straight-double-quoted string outside code spans, of EXAMPLE_WORDS words or more
+const EXAMPLE_WORDS = 8;
+/** Lowercased words, markdown emphasis, backticks and edge punctuation stripped. */
+const exampleWords = (text) => text.toLowerCase().replace(/\*\*|`/g, '').split(/\s+/)
+  .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
+
+/** Every quoted example of EXAMPLE_WORDS+ words in the *.md files of `dir`, as word arrays. */
+function refExamples(dir) {
+  const out = [];
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.md')).sort()) {
+    const text = fs.readFileSync(nodePath.join(dir, f), 'utf8').replace(CODE_SPAN, ' ').replace(/\s+/g, ' ');
+    for (const m of text.matchAll(/"([^"]+)"/g)) {
+      const w = exampleWords(m[1]);
+      if (w.length >= EXAMPLE_WORDS) out.push(w);
+    }
+  }
+  return out;
+}
+
+/** The first example of `examples` an EXAMPLE_WORDS-word run of which the field holds, or null. */
+function copiedExample(lines, examples) {
+  const field = ` ${exampleWords(lines.map((l) => l.replace(/^\s*(?:\d+\.|[-*+])\s+/, '')).join(' ')).join(' ')} `;
+  return examples.find((w) => w.slice(0, w.length - EXAMPLE_WORDS + 1)
+    .some((_, i) => field.includes(` ${w.slice(i, i + EXAMPLE_WORDS).join(' ')} `))) || null;
+}
+
 /** Steps to Test: the structural rules of base references/steps-to-test/{templates,shape-and-size,self-check}.md a script can see. */
-function checkStt(path) {
+function checkStt(path, refs) {
   const fails = [];
   const text = readFile(path, fails);
-  if (text === null) return report(['kind=stt'], fails);
+  const examples = refs ? refExamples(refs) : null;
+  const ex = examples ? `examples=${examples.length}` : 'examples=skipped';
+  if (text === null) return report(['kind=stt', ex], fails);
   const lines = text.split('\n');
   const first = lines.find((l) => l.trim()) || '';
   if (!STT_ITEMS[0][1].test(first)) fails.push('item 1 is not the **Theme:** line');
@@ -115,12 +147,14 @@ function checkStt(path) {
   if (lines.some((l) => HANDLE.test(l))) fails.push('catalog handle in the field (data as properties, never a handle)');
   if (lines.some(notBareLink)) fails.push('preview link not bare (a code span or [label](url) is not clickable in Jira)');
   if (lines.some((l) => /\bNetwork\b/.test(l) && !/\bfilter\b/i.test(l))) fails.push('Network without its filter (every DevTools > Network mention names filter Fetch/XHR, Img, Doc …)');
+  const copied = examples && copiedExample(lines, examples);
+  if (copied) fails.push(`example copied from the references: "${copied.slice(0, 6).join(' ')}…" (write the fact from this ticket's sources)`);
   const words = wordCount(lines);
   if (words > STT_MAX_WORDS) fails.push(`over ${STT_MAX_WORDS} words (${words})`);
   const hits = attributionHits(text);
   if (hits) fails.push('AI attribution');
   const warn = words > STT_TARGET_WORDS && words <= STT_MAX_WORDS ? ['warn=over-120-target'] : [];
-  return report(['kind=stt', `items=${nums.length}`, `words=${words}`, `attribution_hits=${hits}`, ...warn], fails);
+  return report(['kind=stt', `items=${nums.length}`, `words=${words}`, ex, `attribution_hits=${hits}`, ...warn], fails);
 }
 
 // fe create-pull-request reference/body-sections.md: the core skeleton, in order. The docs ask for a
@@ -316,10 +350,18 @@ function main(argv) {
   const [cmd, kind, path, ...rest] = argv;
   if (!['stt', 'pr', 'jira'].includes(kind)) { process.stderr.write(USAGE + '\n'); return 2; }
   if (cmd === 'file' && path) {
+    let refs = null;
+    const r = rest.indexOf('--refs');
+    if (kind === 'stt' && r >= 0) {
+      refs = rest[r + 1];
+      rest.splice(r, 2);
+      try { if (!refs || !fs.statSync(refs).isDirectory()) refs = null; } catch (e) { refs = null; }
+      if (!refs) { process.stderr.write(USAGE + '\n'); return 2; }
+    }
     const unknown = rest.filter((a) => !(kind === 'pr' && (a === '--theme' || a === '--no-preview')));
     if (unknown.length) { process.stderr.write(USAGE + '\n'); return 2; }
     if (kind === 'jira') return checkJira(path);
-    return kind === 'stt' ? checkStt(path) : checkPr(path, noPreviewState(path, rest.includes('--no-preview')));
+    return kind === 'stt' ? checkStt(path, refs) : checkPr(path, noPreviewState(path, rest.includes('--no-preview')));
   }
   if (cmd === 'receipt' && path === undefined) {
     let text = '';

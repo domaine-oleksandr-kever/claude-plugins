@@ -5893,6 +5893,27 @@ dc_stt DC8zo-stt-network-no-filter "$NET" "${CART}   - an affected card: in the 
 sed 's|^4\. \*\*Edge cases / not obvious:\*\*|4. **Edge cases / not obvious:** a network-level fix;|' "$DCD/stt.md" > "$DCD/stt-netlevel.md"
 dc DC8zp-stt-network-level-no-mention 0 'result=ok' file stt "$DCD/stt-netlevel.md"
 grep -qF "$NET" "$DCD/out" && bad DC8zp-no-net-fail "$(tr '\n' ';' < "$DCD/out")" || ok
+# DC8zq–DC8zw: --refs fails a field holding 8 consecutive words of a quoted reference example of 8+ words
+mkdir -p "$DCD/refs"
+cat > "$DCD/refs/rule.md" <<'MD'
+- **Shape** — a bullet reads "the drawer keeps its scroll position after every quantity change in it"; a
+  requirement reads "no active free-delivery offer here"; a code span `"one two three four five six seven eight nine"` is no example.
+MD
+COPIED='fail example copied from the references: "the drawer keeps its scroll position…" (write the fact from this ticket'"'"'s sources)'
+sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart below the threshold; it keeps its **scroll position** after every quantity change, no offer./' "$DCD/stt.md" > "$DCD/stt-copy8.md"
+dc DC8zq-stt-refs-8-words-copied 1 "$COPIED" file stt "$DCD/stt-copy8.md" --refs "$DCD/refs"
+grep -qx 'examples=1' "$DCD/out" && ok || bad DC8zq-examples-count "$(tr '\n' ';' < "$DCD/out")"
+sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart below the threshold; its scroll position after every quantity, no offer./' "$DCD/stt.md" > "$DCD/stt-copy6.md"
+dc DC8zr-stt-refs-6-words-ok 0 'result=ok' file stt "$DCD/stt-copy6.md" --refs "$DCD/refs"
+sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart below the threshold, no active free-delivery offer here./' "$DCD/stt.md" > "$DCD/stt-copy5.md"
+dc DC8zs-stt-refs-short-example-ok 0 'result=ok' file stt "$DCD/stt-copy5.md" --refs "$DCD/refs"
+sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart below the threshold, one two three four five six seven eight nine./' "$DCD/stt.md" > "$DCD/stt-copycode.md"
+dc DC8zt-stt-refs-code-span-no-example 0 'result=ok' file stt "$DCD/stt-copycode.md" --refs "$DCD/refs"
+dc DC8zu-stt-no-refs-skipped 0 'examples=skipped' file stt "$DCD/stt-copy8.md"
+dc DC8zv-stt-refs-missing-dir 2 'usage:' file stt "$DCD/stt.md" --refs "$DCD/no-such-refs"
+dc DC8zv2-stt-refs-no-value 2 'usage:' file stt "$DCD/stt.md" --refs
+dc DC8zw-stt-real-refs-ok 0 'result=ok' file stt "$DCD/stt.md" --refs "$ROOT/plugins/base/references/steps-to-test"
+grep -q '^examples=[1-9]' "$DCD/out" && ok || bad DC8zw-real-examples "$(tr '\n' ';' < "$DCD/out")"
 
 cat > "$DCD/pr.md" <<MD
 ## Summary
