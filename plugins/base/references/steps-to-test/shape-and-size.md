@@ -23,15 +23,22 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   and its item 4 clause "a page with none of these today is not a failed test" is a fact, not a verdict.
 - **Observable words only** — labels as the admin spells them, in bold; routes as `A > B > C`; paths as
   `/products/…`. No code identifiers, file names, setting ids, class names or locale keys — except a found
-  fixture's signature and the locator of an off-screen observation (the request path, the element attribute,
-  the cookie or dataLayer key as the code writes it), in a code span.
+  fixture's signature, the locator of an off-screen observation (the request path, the element attribute,
+  the cookie or dataLayer key as the code writes it) and an identifier the admin shows for QA to search by (a
+  definition's `namespace.key`, a metaobject type handle) after its label, in a code span; a theme setting id
+  is never shown in the admin, so it stays out.
 - **No hedged actions** — no "if present", "roughly", "skip if": an action is taken or the bullet goes.
-  An `optional:` setup bullet, item 1's unconfirmed theme, a time-only state and a found fixture's "look
-  first" and "the source decides" are not hedges.
-- **Absolute hosts only in item 1** — the store host and the preview link; every other path stays
-  relative. Never fork per store.
+  An `optional:` setup bullet, item 1's unconfirmed theme, a time-only state, a found fixture's "look
+  first" and "the source decides", and an entity the store may already hold (a definition, a market, a
+  customer account, a selling plan) written as the action plus `— if the store already has one, use it` in
+  the same bullet are not hedges.
+- **Absolute storefront and admin hosts only in item 1** — the store host, the Shopify admin host and the
+  preview link; every other storefront or admin path stays relative. A third-party admin where QA configures
+  something (Talon.One, Fredhopper, an app's own admin) is named by its host in item 3, once, as the start of
+  its route. Never fork per store.
 - **Banned:** deploy or CI mechanics, storefront passwords, the PR's own preview theme, "works correctly",
   "or similar".
 - **Size.** Target 50–120 words; a one-setting change can be 30. Every sentence is an action or a fact QA
-  needs to reach the change — cut anything else. Over the target, cut wording and item 4 first, never a
-  setup bullet item 3 needs.
+  needs to reach the change — cut anything else. Going over the target is fine whenever every remaining
+  clause is setup or a fact QA needs; vagueness is not. To shorten, cut wording, then item 4 — never a setup
+  bullet item 3 needs, and never a route, a label, a value or a locator.

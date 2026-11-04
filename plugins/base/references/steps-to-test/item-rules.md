@@ -6,7 +6,11 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
 `{% schema %}` with `t:` keys resolved through `locales/en.default.schema.json`, never a code name. A label
 you cannot read is **unverified**: write the best admin-style label the code name gives (`delivery_threshold`
 → **Delivery threshold**), never the code spelling or a note in the field, and list it as unconfirmed in
-the presentation — raised, never dropped. A label outside `{% schema %}` and locales (a Fredhopper facet, a
+the presentation — raised, never dropped. When the admin also shows an identifier QA can search by — a
+metafield or metaobject definition's `namespace.key` in `Settings > Custom data`, a metaobject type handle — it
+follows the label in a code span (**Care instructions**
+(`custom.care_instructions`)); a theme setting id is never shown there, so it stays out
+of the field. A label outside `{% schema %}` and locales (a Fredhopper facet, a
 Talon.One campaign field, an app block setting) is copied from the diff's or `notes.md`'s literal storefront /
 admin text; without one, the best human label, listed as `unconfirmed: label:` naming the source it came from.
 
@@ -14,12 +18,14 @@ admin text; without one, the best human label, listed as `unconfirmed: label:` n
 `theme-resolution.md`), and the route that opens it: a confirmed id on a DEV or UAT store → the preview link
 https://<store>.myshopify.com/?preview_theme_id=<id> as the bare URL, never in a code span or behind a label:
 a code span is not clickable in Jira; a Prod store or an unconfirmed id →
-`Online Store > Themes > <theme> > Preview`, never a preview link.
+`Online Store > Themes > <theme> > Preview`, never a preview link — the store's storefront host (and the
+Shopify admin host when it helps) is still named.
 Never the PR's own preview theme, never Prod or another store as a "before", and a theme without the change
 only when the ticket or the developer's answer names it (`theme-resolution.md` → **Before state**). With the
-placeholder theme, the store is named as the developer answered or as the ticket names it, with no host and
-no preview link (the route form instead); a multi-brand repo with neither lists the store as unconfirmed.
-Market / viewport / locale / customer state / browser or device only when the change depends on them — a
+placeholder theme, the store is named as the developer answered or as the ticket names it, with no preview link
+(the route form instead), its storefront host still named; a multi-brand repo with neither lists the store as unconfirmed.
+Market / viewport / locale / browser or device only when the change depends on them, as the environment the
+store is opened in; a market or customer state the shopper must reach is an item 3 requirement with its route — a
 browser or device when the TA, the diff or `notes.md` says so (the timing of a request, a Safari-only API); a
 viewport-dependent change names the breakpoint in px ("under 1024px" / "1024px and up"), never "mobile" alone.
 When `notes.md`, the ticket or the diff says a nearby environment cannot reach the
@@ -29,17 +35,20 @@ tags, PR links); naming the branch a theme receives ("the theme the TL deploys `
 **2. Object.** Where the change lives, nothing about what it does: pages by path (`/products/…`,
 `/collections/…`; a path is a page type, never a handle or a page that is already set up — the entity is item
 3's property list; a `/pages/<x>` whose template `page.<x>.json` (or `.liquid`) the repo ships is a page
-type), the template by name, the section / block by its admin label, a theme-settings group by its route
+type, and so is Shopify's built-in `/collections/all`), the template by name, the section / block by its admin label, a theme-settings group by its route
 (`Theme settings > <group>`; its values are item 3 bullets), every surface the change reaches (a card in two
-grids, the cart drawer row); three or more surfaces are grouped by page type ("collection and product pages"),
-not listed one by one. **Not visible on screen** — a change in a request, response, dataLayer, cookie or
+grids, the cart drawer row); surfaces are grouped by page type only when the change is the same component on
+every page type ("the product card in every grid"); different sections or blocks are listed one by one, each
+by its admin label, however many. **Not visible on screen** — a change in a request, response, dataLayer, cookie or
 console message: name the tool, the panel and the filter (`DevTools > Network, filter "cart", request
 /cart/update.js`); every `DevTools > Network` mention in the field names its filter (`filter Fetch/XHR` for a
 feed or API response, `Img` for image downloads, `Doc` for the page), and an item 3 source that sits under
 another filter than item 2's names its own; the expected value stays out (it is the AC). A change in an
 element's attribute or hidden text: name `DevTools > Elements`, the element, and the attribute as the code
 writes it, in a code span; its value only as a shape with placeholders (`aria-label="<n> of <total>"`,
-`data-state="<open|closed>"`), never a concrete expected value. Every `DevTools > Elements` mention in the
+`data-state="<open|closed>"`), never a concrete expected value; placeholders only for what varies per
+instance (a count, an id, a state), and the fixed words the code renders in the test store's locale written
+as they render — `aria-label="<n> of <total>"`, never `"<n> <of> <total>"`. Every `DevTools > Elements` mention in the
 field names the attribute or selector it points at, in a code span. The request path and params are read
 from the code that sends it (the component or helper the changed file calls), never from an answer alone; an
 attribute is read from the markup or script that writes it.
@@ -49,9 +58,12 @@ metafield and metaobject definitions → entries → values → theme settings �
 action or per entity; everything the change adds or re-wires has its route and its non-default settings here.
 Item 3 makes reachable every state the Description or AC claims — the fixed state and every state the change
 deliberately keeps or limits ("trimming still happens under a size filter"); a kept state gets its setup
-bullet like an added one. Admin, store and theme state only: what the shopper does on the storefront while
-testing (a filter chosen, a search term typed, a cart below a threshold) is not a setup bullet (a cache in
-the way's clear route excepted) — when it
+bullet like an added one. Admin, store and theme state, plus the storefront **state** the shopper must be in
+before the change is reachable (logged in as a customer of a given kind, a cart holding N items or above /
+below a threshold, cookie consent accepted or declined, a market chosen): that state is a setup bullet,
+written as a requirement ("a cart with 2+ items of the same product") with its storefront route when one is
+not obvious. A storefront **action** that is the test itself (a filter chosen, a search term typed, a button
+clicked) is not a setup bullet (a cache in the way's clear route excepted) — when it
 conditions the behaviour it is an item 4 fact; the data it needs (a product the search term returns) stays
 item 3 data.
 
@@ -96,8 +108,9 @@ item 3 data.
   sessionStorage, Cache API and a CDN header before deciding there is none.
 - **Optional** — only setup that reaches an item 4 fact outside the Description and AC opens with `optional:`.
 - **Bug** — the admin / store / theme state that makes the defect reachable (data shape, viewport, market,
-  setting value), as requirements, plus the state the fix keeps or limits; never the root cause or the fix. A
-  storefront choice (a filter selected, a search typed) is an item 4 fact, not a bullet.
+  setting value, a storefront state such as a logged-in customer or a cart past a threshold), as requirements,
+  plus the state the fix keeps or limits; never the root cause or the fix. A storefront action that is the
+  test itself (a filter selected, a search typed) is an item 4 fact, not a bullet.
 
 **4. Edge cases / not obvious.** Facts from the diff and `notes.md` only, and only facts this change creates or changes, platform limits it hits and
 what this ticket deliberately leaves out; behaviour nearby code already had is not an item 4 fact unless

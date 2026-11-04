@@ -6,6 +6,8 @@ QA **how to set the change up so it is testable**; QA tests it against the AC, w
 It is not a test script: no walk-through, no expected results, nothing restated from the Description or
 AC. Say **what** QA has to configure — the kind of product, collection, setting value — and let QA build
 it; never hand over a ready-made fixture.
+The goal every rule serves: a QA who sees this project for the first time knows, from the field alone,
+where every named thing is, what to set it to and where the result shows — clarity beats the word target.
 When the session carries the how-to-explain convention, sentences follow it; this format decides
 structure and mandatory wording.
 
