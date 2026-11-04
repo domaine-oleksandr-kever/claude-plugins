@@ -22,8 +22,9 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   language — QA decides how to test from the AC. A recipe to find a fixture QA cannot configure is setup,
   and its item 4 clause "a page with none of these today is not a failed test" is a fact, not a verdict.
 - **Observable words only** — labels as the admin spells them, in bold; routes as `A > B > C`; paths as
-  `/products/…`. No code identifiers, file names, setting ids, class names, DOM attributes or locale keys —
-  except a found fixture's signature, which quotes the key or value its source shows, in a code span.
+  `/products/…`. No code identifiers, file names, setting ids, class names or locale keys — except a found
+  fixture's signature and the locator of an off-screen observation (the request path, the element attribute,
+  the cookie or dataLayer key as the code writes it), in a code span.
 - **No hedged actions** — no "if present", "roughly", "skip if": an action is taken or the bullet goes.
   An `optional:` setup bullet, item 1's unconfirmed theme, a time-only state and a found fixture's "look
   first" and "the source decides" are not hedges.

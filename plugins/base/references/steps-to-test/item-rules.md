@@ -36,9 +36,13 @@ not listed one by one. **Not visible on screen** — a change in a request, resp
 console message: name the tool, the panel and the filter (`DevTools > Network, filter "cart", request
 /cart/update.js`); every `DevTools > Network` mention in the field names its filter (`filter Fetch/XHR` for a
 feed or API response, `Img` for image downloads, `Doc` for the page), and an item 3 source that sits under
-another filter than item 2's names its own; the expected value stays out (it is the AC). The request path and
-params are read from the code that sends it (the component or helper the changed file calls), never from an
-answer alone.
+another filter than item 2's names its own; the expected value stays out (it is the AC). A change in an
+element's attribute or hidden text: name `DevTools > Elements`, the element, and the attribute as the code
+writes it, in a code span; its value only as a shape with placeholders (`aria-label="<n> of <total>"`,
+`data-state="<open|closed>"`), never a concrete expected value. Every `DevTools > Elements` mention in the
+field names the attribute or selector it points at, in a code span. The request path and params are read
+from the code that sends it (the component or helper the changed file calls), never from an answer alone; an
+attribute is read from the markup or script that writes it.
 
 **3. Setup.** What QA has to configure to reach the change, in dependency order: store / market settings →
 metafield and metaobject definitions → entries → values → theme settings → content. One bullet per
@@ -104,7 +108,7 @@ appears only the next calendar day`); what is intentionally out of this ticket; 
 like a defect; a visible change in the diff the Description does not mention (a moved element, a restyled
 control), stated as a fact with "by design" — the one "what changed" allowed; with no AC, a by-design
 difference QA would otherwise file (£40 in one place, £40.00 in another); for an off-screen change, the
-field that changes — never its value; with a found fixture in item 3, "a page with none of these today is not
+field that changes (a request param, an element attribute) — never its value; with a found fixture in item 3, "a page with none of these today is not
 a failed test". Never a scenario
 ("open X, click Y"), never an expected result the AC already states. Either one line of clauses separated
 by semicolons on the item's own line, or nested bullets, one fact each.

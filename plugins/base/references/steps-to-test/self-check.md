@@ -11,7 +11,8 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   other.
 - Item 2 names where the change lives — every page by path, the section / block by its admin label, every
   surface it reaches — and, for a change not visible on screen, the tool, panel and filter, every
-  `DevTools > Network` mention with its filter.
+  `DevTools > Network` mention with its filter, every `DevTools > Elements` mention with its attribute or
+  selector in a code span.
 - Everything the change adds or re-wires has its route and every non-default setting with its value by
   label in item 3, in dependency order; a theme-editor recipe ends with **Save**.
 - Every state the Description or AC claims — fixed, kept or limited — has its setup in item 3, without
@@ -29,7 +30,8 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   look first, and that the source decides; item 4 says a page with none is not a failed test.
 - The state that makes the changed code path run (the diff's `if` / `elsif` / `unless` guard) is an item 3
   bullet; the state that bypasses it is an item 4 fact.
-- Every off-screen observation names the request as the code sends it; an answer the code or a review
+- Every off-screen observation names the request as the code sends it, or the attribute as the code
+  writes it, its value only as a shape with placeholders; an answer the code or a review
   contradicts, or that no source shows, is `unconfirmed: observation:` in the presentation.
 - A cache between QA and the change names what it holds, where, and how QA empties it (clear site data or a
   wait past its TTL), never a bare wait.
@@ -49,5 +51,5 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
 - Word count within 50–120 (a one-setting change may be 30), or over it only for setup item 3 needs.
 - No banned content: a walk-through, "You should see", an expected result, the PR's preview theme,
   absolute hosts outside item 1, passwords, deploy or CI mechanics, "works correctly", "or similar", a
-  hedge, a code identifier (a found fixture's quoted signature and "look first" excepted), an example
-  sentence from these references.
+  hedge, a code identifier (a found fixture's quoted signature, an off-screen observation's locator and
+  "look first" excepted), an example sentence from these references.
