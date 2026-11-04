@@ -16,8 +16,10 @@ const TMPDIR_OK_RE = /__(take_screenshot|take_snapshot|get_network_request)$/
 
 // Constant on purpose: the describe answer is cached per session and any change spends the prompt cache.
 const NOTE_HEAD =
-  '\n\nbase scratch-path guard: paths must resolve inside this project: `.claude/tasks/<work-id>/tmp/` ' +
-  '(`.claude/tmp/<work-id>/` in a git worktree) or `.claude/tmp/`; use an absolute path. '
+  "\n\nbase scratch-path guard: any path under this project's `.claude/` is accepted (in a git worktree " +
+  '`.claude/tasks/` is a symlink the servers refuse: use `.claude/tmp/<work-id>/`); elsewhere in the working tree ' +
+  'it is refused as litter. Scratch belongs in `.claude/tasks/<work-id>/tmp/` or `.claude/tmp/`; a skill may name ' +
+  "its own dir under `.claude/` (the qa preflight's `.claude/tasks/<KEY>/preflight/`). Use an absolute path. "
 const NOTE = NOTE_HEAD + 'Paths outside the project are refused.'
 const NOTE_TMPDIR = NOTE_HEAD + "Paths outside the project, other than this server's own OS temp dir, are refused."
 

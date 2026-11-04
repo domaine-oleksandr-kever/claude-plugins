@@ -48,7 +48,8 @@
  * second paragraph survives; a construct ADF forbids inside a quote degrades to paragraph text),
  * and GFM pipe tables (`<br>` in a cell is a hard break). A heading's closing `#` run is dropped.
  * Underscore emphasis (_x_/__x__) is intentionally NOT treated as italics/bold so
- * snake_case identifiers survive; use * / ** for emphasis.
+ * snake_case identifiers survive; use * / ** for emphasis. A `*` run followed by a space or by
+ * `,` `;` `:` `)` `]` `}` never opens emphasis, so globs (`a * b`, `X-*, Y-*`) stay literal.
  *
  * Backslash escapes follow CommonMark: the backslash is dropped in front of any of
  * \ ` * _ # + - . > | ~ [ ] { anywhere in the input. That covers every marker slim's adf engine
@@ -293,6 +294,8 @@ function findCloser(s, from, ch, n) {
   return -1;
 }
 
+const EMPH_OPEN_LITERAL = /[ \t\n,;:)\]}]/;
+
 // CommonMark pairs a closer with the NEAREST opener before it. An opener that a later one
 // shadows therefore has to stay literal: otherwise an intraword run steals the real opener's
 // closer, and the mark covers the wrong text with the run's own characters deleted
@@ -305,7 +308,7 @@ function shadowedOpener(s, from, to, ch, n) {
     if (c === '`') { const sp = scanCode(s, j); if (sp) { j = sp.end; continue; } }
     if (c === ch) {
       const run = runLength(s, j);
-      if (run === n && j + run < to && !/[ \t\n]/.test(s[j + run])) return true;
+      if (run === n && j + run < to && !(ch === '~' ? /[ \t\n]/ : EMPH_OPEN_LITERAL).test(s[j + run])) return true;
       j += run;
       continue;
     }
@@ -321,9 +324,9 @@ function scanEmph(s, i, noClose) {
   const ch = s[i];
   const run = runLength(s, i);
   // emphasis requires non-space flanks so formulas and globs in prose
-  // (`a * b`, `SELECT *`, `2 ** 3`) never turn into stray marks with eaten asterisks
+  // (`a * b`, `SELECT *`, `2 ** 3`, `X-*, Y-*`) never turn into stray marks with eaten asterisks
   const nxt = s[i + run];
-  if (ch === '~' ? run < 2 : nxt === undefined || /[ \t\n]/.test(nxt)) return null;
+  if (ch === '~' ? run < 2 : nxt === undefined || EMPH_OPEN_LITERAL.test(nxt)) return null;
   const key = ch + run;
   if (noClose.has(key)) return null;
   const close = findCloser(s, i + run, ch, run);

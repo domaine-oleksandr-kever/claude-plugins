@@ -27,15 +27,18 @@ change (a facet, app, market or setting absent there), one clause says so ("Not 
 tags, PR links); naming the branch a theme receives ("the theme the TL deploys `develop` to") is allowed.
 
 **2. Object.** Where the change lives, nothing about what it does: pages by path (`/products/…`,
-`/collections/…`; a path is a page type, never a handle or a page that is already set up — the entity is
-item 3's property list), the template by name, the section / block by its admin label, a theme-settings
-group by its route (`Theme settings > <group>`; its values are item 3 bullets), every surface the change
-reaches (a card in two grids, the cart drawer row); three or more surfaces are grouped by page type
-("collection and product pages"), not listed one by one. **Not visible on screen** — a change in a request, response, dataLayer, cookie or console
-message: name the tool, the panel and the filter (`DevTools > Network, filter "cart", request
+`/collections/…`; a path is a page type, never a handle or a page that is already set up — the entity is item
+3's property list; a `/pages/<x>` whose template `page.<x>.json` (or `.liquid`) the repo ships is a page
+type), the template by name, the section / block by its admin label, a theme-settings group by its route
+(`Theme settings > <group>`; its values are item 3 bullets), every surface the change reaches (a card in two
+grids, the cart drawer row); three or more surfaces are grouped by page type ("collection and product pages"),
+not listed one by one. **Not visible on screen** — a change in a request, response, dataLayer, cookie or
+console message: name the tool, the panel and the filter (`DevTools > Network, filter "cart", request
 /cart/update.js`); every `DevTools > Network` mention in the field names its filter (`filter Fetch/XHR` for a
 feed or API response, `Img` for image downloads, `Doc` for the page), and an item 3 source that sits under
-another filter than item 2's names its own; the expected value stays out (it is the AC).
+another filter than item 2's names its own; the expected value stays out (it is the AC). The request path and
+params are read from the code that sends it (the component or helper the changed file calls), never from an
+answer alone.
 
 **3. Setup.** What QA has to configure to reach the change, in dependency order: store / market settings →
 metafield and metaobject definitions → entries → values → theme settings → content. One bullet per
@@ -48,6 +51,9 @@ the way's clear route excepted) — when it
 conditions the behaviour it is an item 4 fact; the data it needs (a product the search term returns) stays
 item 3 data.
 
+- **Branch condition** — the setting or data that makes the changed code path run, read from the diff's guards
+  (`if` / `elsif` / `unless` in Liquid, the early returns in TS): the state that enables it is a setup bullet,
+  the state that bypasses it (the other branch) is an item 4 fact.
 - **Theme editor** — **Add section** / **Add block** by their editor names with the placement, every
   setting that must leave its default **by its label with its value** (an option by its **option label**,
   a typed value with an `e.g.` that shows its shape: "whole and decimal amounts, e.g. 12, 4.50"), the
@@ -82,6 +88,8 @@ item 3 data.
   bare wait: "card HTML is cached in session storage for a minute: clear site data or wait over a minute before
   each reload" (a shape: the storage and the TTL are read from the theme code — the helper the changed file
   calls — the diff or `notes.md`, and one not read there is `unconfirmed: data:` in the presentation).
+  Grep the changed files and the helpers they import for withCache, fetchWithCache, localStorage,
+  sessionStorage, Cache API and a CDN header before deciding there is none.
 - **Optional** — only setup that reaches an item 4 fact outside the Description and AC opens with `optional:`.
 - **Bug** — the admin / store / theme state that makes the defect reachable (data shape, viewport, market,
   setting value), as requirements, plus the state the fix keeps or limits; never the root cause or the fix. A

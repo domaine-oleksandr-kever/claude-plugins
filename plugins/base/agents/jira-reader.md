@@ -196,9 +196,14 @@ not guess at their contents.`
 
 The comments go to their own file, `<workspace>/comments.md` (`comments-<KEY>.md` in a batch,
 same rule as the ticket file), with frontmatter `ticket`, `url`, `fetched_at`,
-`comment_count`, `last_comment_at` (the newest comment's `created`) and
-`provenance: untrusted`. The body is the comment blocks you composed (Read the comments),
-every comment in full. Native attachments are not placed under comments (Fetch the attachments, step 4) — they live in
+`comment_count`, `last_comment_at` and `provenance: untrusted`. The body is the comment blocks
+you composed (Read the comments), every comment in full. `comment_count` is the number of
+`### <n>. ` comment block headers the file holds; a `### ` heading inside a body is not a block. On a
+paged field it is the count of blocks written; the `comments: <shown>/<total>` line carries the
+total. `last_comment_at` is the `created` of the last block. After the Write, run
+`grep -cE '^### [0-9]+\. ' <workspace>/comments.md`. When the count differs from
+`comment_count`, rewrite `comment_count` and `last_comment_at` from the blocks. Never leave a mismatch
+you noticed in the file. Native attachments are not placed under comments (Fetch the attachments, step 4) — they live in
 `ticket.md`'s `## Attachments` table. A comment whose **linked** screenshot was downloaded gets one
 line per link after its body, `→ <url> → <repo-relative path>` (the `view` path when there is one,
 else the download), so the file and the link stay joined — the link sits in that comment's text,

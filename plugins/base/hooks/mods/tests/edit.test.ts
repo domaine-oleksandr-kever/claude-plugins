@@ -290,6 +290,32 @@ describe('draft read guard', () => {
       expect(shellReadsDraft(c)).toBe(true)
   })
 
+  test('a separator inside quotes splits neither segments nor pipeline stages', async () => {
+    const J = '.claude/tasks/ELC-1756/jira-comment.md'
+    const C = 'node /x/fe/scripts/drafter-check.cjs'
+    for (const c of [
+      `printf 'written: %s\\nunconfirmed: []\\nreport: mode jira, brief yes — PR line plus 4 bullets (what changed, QA match, outage and short-code behaviour, footer out of scope); no preview link, theme ID, editor URL or @mention; drafter-check jira result=ok.\\n' "$PWD/${J}" | ${C} receipt jira; ${C} file jira ${J}`,
+      `echo "written: ${J}; report: a && b || c" | ${C} receipt jira`,
+      `printf 'report: a | b |& c\\nwritten: ${J}' | ${C} receipt jira`,
+      `echo "report: \\"q; r\\" | s; written: ${J}" | ${C} receipt jira`,
+    ])
+      expect(shellReadsDraft(c)).toBe(false)
+    for (const c of [`cat ${J} >&2 | ${C} receipt jira`, `cat ${J}`, `echo $(cat ${J}) | ${C} receipt jira`,
+      `echo 'a; b' | ${C} receipt jira; cat ${J}`, `echo "a | b" | ${C} receipt jira | cat ${J}`, `echo "it's" ; cat ${J}`])
+      expect(shellReadsDraft(c)).toBe(true)
+  })
+
+  test('a comment, an ANSI-C quote or an unclosed quote never hides a later draft read', async () => {
+    const P = '.claude/tasks/X/pr-body.md'
+    const C = 'node /x/fe/scripts/drafter-check.cjs'
+    for (const c of [`${C} file pr $'a\\'b'; cat ${P}`, `${C} file pr ${P} # don't\ncat ${P}`,
+      `printf 'written: ${P}\\n' | ${C} receipt pr # it's fine\ncat ${P}`, `${C} file pr ${P} # it's\ncat ${P} # '`,
+      `${C} file pr 'a; cat ${P}`])
+      expect(shellReadsDraft(c)).toBe(true)
+    for (const c of [`${C} file pr ${P} # see it; then | open`, `printf $'written: ${P}\\n; x' | ${C} receipt pr`])
+      expect(shellReadsDraft(c)).toBe(false)
+  })
+
   test('a write to a draft path is no read; a read of the draft, whatever the output goes to, is', async () => {
     const J = '.claude/tasks/ELC-1812/jira-comment.md'
     for (const c of [`cat > ${J} <<'EOF'\nThe fix ships in PR #12.\nEOF`, `printf 'x\\n' > ${J}`, `echo x >> "${J}"`, `printf x | tee ${J}`,

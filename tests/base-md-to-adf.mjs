@@ -46,6 +46,14 @@ check('m2a-heading-paragraph', m2a('# Title\n\nSome text'), doc([h(1, [t('Title'
 check('m2a-marks', m2a('**b** *i* `c` ~~s~~'),
   doc([p([t('b', [strong]), t(' '), t('i', [em]), t(' '), t('c', [code]), t(' '), t('s', [{ type: 'strike' }])])]));
 check('m2a-link', m2a('[x](https://l.test)'), doc([p([t('x', [link('https://l.test')])])]));
+// a `*` before closing/separating punctuation is a glob, not an italics opener; closers keep their rule
+const GLOB = 'Older dev/campaign themes (UKDIGITAL-*, [DEV]-*, Red_Roses_LP_Launch) still hold the block';
+check('m2a-em-glob-comma', m2a(GLOB), doc([p([t(GLOB)])]));
+check('m2a-em-glob-then-real', m2a('UKDIGITAL-*, [DEV]-*, then *real italics* here'),
+  doc([p([t('UKDIGITAL-*, [DEV]-*, then '), t('real italics', [em]), t(' here')])]));
+check('m2a-em-glob-paren', m2a('(a-*, b-*)'), doc([p([t('(a-*, b-*)')])]));
+check('m2a-em-opener-comma', m2a('*,x*'), doc([p([t('*,x*')])]));
+check('m2a-em-closer-after-period', m2a('*see note.*'), doc([p([t('see note.', [em])])]));
 check('m2a-autolink', m2a('<https://l.test/a>'), doc([p([t('https://l.test/a', [link('https://l.test/a')])])]));
 check('m2a-bare-url', m2a('see https://x.test/p?_ab=0&_fd=0.'),
   doc([p([t('see '), t('https://x.test/p?_ab=0&_fd=0', [link('https://x.test/p?_ab=0&_fd=0')]), t('.')])]));
@@ -186,6 +194,7 @@ const CORPUS = [
   '| H |\n| --- |\n| `a|b` |',
   'Literal \\# not a heading, \\- not a list, 1\\. not ordered',
   'snake_case_name and customfield_10038 and __init__',
+  'themes (UKDIGITAL-*, [DEV]-*, Red_Roses_LP_Launch) and *real* italics',
   'line one  \nline two\\\nline three',
   'Intro\n\n|  |  |\n| --- | --- |',
   'Fields:\nName | Type\n--- | ---\nsku | text',

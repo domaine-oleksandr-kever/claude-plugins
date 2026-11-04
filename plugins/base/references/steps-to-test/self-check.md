@@ -19,13 +19,18 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   the way's clear route excepted.
 - Every data need in item 3 is a property list whose counts and values make the changed behaviour
   distinguishable from the unchanged one; a metafield value uses the entry's `Metafields` route; zero catalog handles, titles or "the page that is already
-  set up" anywhere in the field (a path in item 2 is a page type); an entity QA creates is named by its
+  set up" anywhere in the field (a path in item 2 is a page type, and so is a `/pages/<x>` whose
+  `page.<x>.json` (or `.liquid`) the repo ships); an entity QA creates is named by its
   role; every store-wide mutation carries its restore.
 - No invented before: no Prod or other store as a "before"; a theme without the change only when the ticket
   or the developer's answer names it.
 - An entity QA cannot configure (a feed, a third-party service, time) has a finding recipe in item 3: its
   signature in a source that still shows it after the change, never the symptom the change removes, where to
   look first, and that the source decides; item 4 says a page with none is not a failed test.
+- The state that makes the changed code path run (the diff's `if` / `elsif` / `unless` guard) is an item 3
+  bullet; the state that bypasses it is an item 4 fact.
+- Every off-screen observation names the request as the code sends it; an answer the code or a review
+  contradicts, or that no source shows, is `unconfirmed: observation:` in the presentation.
 - A cache between QA and the change names what it holds, where, and how QA empties it (clear site data or a
   wait past its TTL), never a bare wait.
 - A store state that would hide or override the change (an active offer, an app override, a feature flag,

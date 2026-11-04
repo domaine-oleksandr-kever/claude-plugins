@@ -35,7 +35,8 @@ before re-reading the whole ticket:
    changelog entry). Match the FULL name, case-insensitively — `Acceptance Criteria
    Status` is a different, workflow-tracking field, not content.
 3. **None changed, but the discussion moved** — the comment `total` or the newest `created`
-   from step 1 differs from `comments.md`'s `comment_count` / `last_comment_at` frontmatter
+   from step 1 differs from `comments.md`'s `comment_count` (on a paged field, the total of its
+   `comments: <shown>/<total>` line) / `last_comment_at` frontmatter
    (or that file is missing while the ticket has comments) → **comment-only refresh**: run
    the comments step and the attachments step of your prompt, rewrite `comments.md` and
    `ticket.md`'s `## Attachments` section, leave every other cached field untouched, and

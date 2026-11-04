@@ -43,6 +43,8 @@ const ASSIGN_ONLY = new RegExp(String.raw`^\s*(?:(?:export|local|declare|readonl
 const ASSIGN = new RegExp(String.raw`(\w+)=(${VALUE})`, 'g')
 // a heredoc start (`<<EOF`, `<<-'EOF'`), not a here-string (`<<<`)
 const HEREDOC = /(?<!<)<<-?\s*(['"]?)(\w+)\1/
+const SEGMENT_SEP = /&&|\|\||[;\n]/y
+const STAGE_SEP = /(?<!>)\|&?/y
 const VIEW_TOOL = 'mcp__slim__view'
 const FILES_CAP = 50
 
@@ -133,16 +135,52 @@ async function modelFor($: $, sid: string): Promise<string | null> {
 export function shellReadsDraft(command: string): boolean {
   const vars = new Map<string, string>()
   const expand = (s: string) => s.replace(/\$\{?(\w+)\}?/g, (m, v: string) => vars.get(v) ?? m)
-  return withoutHeredocs(command).split(/&&|\|\||[;\n]/).some(raw => {
+  return splitUnquoted(withoutHeredocs(command), SEGMENT_SEP).some(raw => {
     // a draft path parked in a variable is no read; its later use is matched with the value substituted
     if (ASSIGN_ONLY.test(raw)) {
       for (const [, name, value] of raw.matchAll(ASSIGN)) vars.set(name, expand(value.replace(/^(['"])(.*)\1$/, '$2')))
       return false
     }
-    const stages = expand(raw).split(/(?<!>)\|&?/)
+    const stages = splitUnquoted(expand(raw), STAGE_SEP)
     const last = stages.map(seg => CHECKER.test(seg)).lastIndexOf(true)
     return stages.some((seg, i) => DRAFT_ARG.test(seg.replace(DRAFT_WRITE, '')) && !DRAFT_OK.test(seg) && !(i < last && RECEIPT(seg)))
   })
+}
+
+/** `s` split at each match of the sticky `sep` outside quotes (`'…'`, `"…"`, `$'…'`), backslash escapes and `#` comments;
+ *  an unclosed quote fails closed to the plain split. */
+function splitUnquoted(s: string, sep: RegExp): string[] {
+  const parts: string[] = []
+  let start = 0
+  let quote = ''
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (quote === "'") {
+      if (c === "'") quote = ''
+    } else if (c === '\\') i++
+    else if (quote) {
+      if (c === quote[quote.length - 1]) quote = ''
+    } else if (c === '$' && s[i + 1] === "'") {
+      quote = "$'"
+      i++
+    }
+    else if (c === "'" || c === '"') quote = c
+    else if (c === '#' && (i === 0 || /[\s;|&]/.test(s[i - 1]))) {
+      const nl = s.indexOf('\n', i)
+      i = (nl < 0 ? s.length : nl) - 1
+    } else {
+      sep.lastIndex = i
+      const m = sep.exec(s)
+      if (m) {
+        parts.push(s.slice(start, i))
+        start = i + m[0].length
+        i = start - 1
+      }
+    }
+  }
+  if (quote) return s.split(new RegExp(sep.source, 'g'))
+  parts.push(s.slice(start))
+  return parts
 }
 
 /** The command without its heredoc bodies: they are stdin data, not commands. */

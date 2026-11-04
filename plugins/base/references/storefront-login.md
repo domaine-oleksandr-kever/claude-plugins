@@ -7,8 +7,11 @@
    developer, or a memory note holds it. A dev and a UAT store of the same brand can have different
    passwords: take each store's own, never another store's.
 2. **Open** `https://<domain>/password`.
-3. **Field** — `form:has(input[value=storefront_password]) input[name=password]`, the storefront
-   gate's input (a page can carry other password inputs); take its `ref` / `uid` from a snapshot.
+3. **Field** — `form[action*="/password"] input[name=password]`, the storefront gate's input (the
+   gate form posts to `/password`; a page can carry other password inputs). A page with several
+   `/password` forms → the narrower `form:has(input[value=storefront_password]) input[name=password]`
+   (not every theme's gate form carries that `form_type` field). Take its `ref` / `uid` from a
+   snapshot.
 4. **Fill** — Playwright MCP: `browser_type` (or `browser_fill_form`) on that ref; chrome-devtools
    MCP: `fill` on that uid. Never through `browser_evaluate` / `evaluate_script` with the password
    in a JS string: the host's auto-mode classifier blocks that as input exfiltration.
