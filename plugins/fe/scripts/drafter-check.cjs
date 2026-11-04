@@ -5,7 +5,9 @@
 //   drafter-check.cjs file stt <path> [--refs <dir>]  steps-to-test.md: the four items as one list; no
 //                                                expectation, old-format text or handle; the preview link
 //                                                bare (no code span, no [label](url)); every DevTools >
-//                                                Network mention names its filter; words (fail over 160,
+//                                                Network mention names its filter; every DevTools >
+//                                                Elements mention names its attribute or selector in a
+//                                                code span; words (fail over 160,
 //                                                warn=over-120-target above 120), attribution; with --refs
 //                                                (base references/steps-to-test), no 8-word run of a
 //                                                quoted reference example of 8+ words
@@ -165,6 +167,7 @@ function checkStt(path, refs) {
   if (lines.some((l) => HANDLE.test(unbound(l)))) fails.push('catalog handle in the field (data as properties, never a handle; a /pages/<x> with templates/page.<x>.json is a page type)');
   if (lines.some(notBareLink)) fails.push('preview link not bare (a code span or [label](url) is not clickable in Jira)');
   if (lines.some((l) => /\bNetwork\b/.test(l) && !/\bfilter\b/i.test(l))) fails.push('Network without its filter (every DevTools > Network mention names filter Fetch/XHR, Img, Doc …)');
+  if (lines.some((l) => /DevTools\s*>\s*Elements\b|\bElements (panel|tab)\b/.test(l) && !l.includes('`'))) fails.push('Elements without its attribute (every DevTools > Elements mention names the attribute or selector it points at, in a code span)');
   const copied = examples && copiedExample(lines, examples);
   if (copied) fails.push(`example copied from the references: "${copied.slice(0, 6).join(' ')}…" (write the fact from this ticket's sources)`);
   const words = wordCount(lines);

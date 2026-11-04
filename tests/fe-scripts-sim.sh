@@ -5909,6 +5909,14 @@ dc_stt DC8zo-stt-network-no-filter "$NET" "${CART}   - an affected card: in the 
 sed 's|^4\. \*\*Edge cases / not obvious:\*\*|4. **Edge cases / not obvious:** a network-level fix;|' "$DCD/stt.md" > "$DCD/stt-netlevel.md"
 dc DC8zp-stt-network-level-no-mention 0 'result=ok' file stt "$DCD/stt-netlevel.md"
 grep -qF "$NET" "$DCD/out" && bad DC8zp-no-net-fail "$(tr '\n' ';' < "$DCD/out")" || ok
+# DC8zx–DC8zz: every DevTools > Elements mention names its attribute or selector in a code span; a prose "Elements" is no mention
+ELM='fail Elements without its attribute'
+sed 's|^2\. \*\*Object:\*\* .*|2. **Object:** the product gallery slides; not visible: DevTools > Elements, `aria-label="<n> of <total>"` on each slide.|' "$DCD/stt.md" > "$DCD/stt-elm.md"
+dc DC8zx-stt-elements-with-attribute 0 'result=ok' file stt "$DCD/stt-elm.md"
+dc_stt DC8zy-stt-elements-no-attribute "$ELM" 's|^2\. \*\*Object:\*\* .*|2. **Object:** the product gallery slides; not visible: DevTools > Elements, each slide'"'"'s accessible label.|'
+sed 's|^4\. \*\*Edge cases / not obvious:\*\*|4. **Edge cases / not obvious:** Elements of the bundle keep their order;|' "$DCD/stt.md" > "$DCD/stt-elmprose.md"
+dc DC8zz-stt-elements-prose-no-mention 0 'result=ok' file stt "$DCD/stt-elmprose.md"
+grep -qF "$ELM" "$DCD/out" && bad DC8zz-no-elm-fail "$(tr '\n' ';' < "$DCD/out")" || ok
 # DC8zq–DC8zw: --refs fails a field holding 8 consecutive words of a quoted reference example of 8+ words
 mkdir -p "$DCD/refs"
 cat > "$DCD/refs/rule.md" <<'MD'
