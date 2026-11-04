@@ -90,8 +90,8 @@ report is distilled from these entries; the Jira hand-off brief from the `ta-div
 Phase agents never inherit the session model — the conductor passes the phase's model on every
 spawn (this section is the single home of the **Step 4 phase-agent** assignments; the briefs
 those agents get live in `pipeline-phases.md` — **read only at the start of Step 4**, never
-before the gate). Two tiers, by phase: **reasoning-heavy** — implement, qa, and the fix agents
-in the qa loop and aftercare; **mechanical** — finalize, create-pr, steps-to-test, and the
+before the gate). Two tiers, by phase: **reasoning-heavy** — implement, qa, steps-to-test, and the fix agents
+in the qa loop and aftercare; **mechanical** — finalize, create-pr, and the
 aftercare poll/triage agent (its fix agents are reasoning-heavy). Reasoning-heavy pins `opus`,
 mechanical pins `sonnet`. The inline conductor step (jira-hand-off) has the comment drafted by
 `fe:pr-body-drafter` and its one Jira write done by the `base:jira-writer` subagent (so the

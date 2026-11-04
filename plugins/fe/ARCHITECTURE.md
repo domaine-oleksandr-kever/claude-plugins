@@ -16,7 +16,7 @@ plugins/fe/
 ├── skills/<name>/SKILL.md       the 12 Shopify theme skills (`/fe:<name>`); fix-breaking-changes
 │                                carries its script template, create-pull-request its REFERENCE.md
 ├── agents/theme-explorer.md     the read-only theme scout (`fe:theme-explorer`)
-├── agents/stt-drafter.md        drafts the four-item Steps to Test into the workspace (`fe:stt-drafter`, sonnet)
+├── agents/stt-drafter.md        drafts the four-item Steps to Test into the workspace (`fe:stt-drafter`, opus)
 ├── agents/pr-body-drafter.md    drafts the PR title, body and Jira PR-link comment into the workspace (`fe:pr-body-drafter`, haiku)
 ├── references/*.md              what fe's skills and agents read on demand (`<fe root>/references/…`);
 │                                drafter-loop.md is the one home of the drafter loop

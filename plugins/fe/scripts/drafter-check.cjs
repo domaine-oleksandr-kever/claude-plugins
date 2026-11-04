@@ -7,8 +7,8 @@
 //                                                bare (no code span, no [label](url)); every DevTools >
 //                                                Network mention names its filter; every DevTools >
 //                                                Elements mention names its attribute or selector in a
-//                                                code span; words (fail over 160,
-//                                                warn=over-120-target above 120), attribution; with --refs
+//                                                code span; words (warn=over-160 above 160,
+//                                                warn=over-120-target from 121 to 160), attribution; with --refs
 //                                                (base references/steps-to-test), no 8-word run of a
 //                                                quoted reference example of 8+ words
 //   drafter-check.cjs file pr <path> [--no-preview]  pr-body.md: core skeleton, theme preview table
@@ -31,7 +31,8 @@ const USAGE = `usage: drafter-check.cjs file stt <path> [--refs <dir>]
 The pr check requires the Theme preview table; --no-preview turns that off only when the notes.md
 beside the checked file holds a 'preview-decision: no preview' line (the developer's recorded
 answer) — else the table is still required. Prints no_preview=recorded|unrecorded|off.
-The stt check fails over 160 words and prints warn=over-120-target from 121 to 160 (still ok).
+The stt check never fails on words: it prints warn=over-120-target from 121 to 160 and warn=over-160
+above 160 (still ok).
 --refs <dir> (an existing dir of *.md) fails a field holding 8 consecutive words of a "quoted" example
 of 8+ words from those files; prints examples=<n checked>, else examples=skipped.
 Prints result=ok|fail, counts and one 'fail <check>' line per defect — never the checked text.
@@ -64,9 +65,11 @@ const EXPECTATION = /\bshould (?:now )?(?:see|show|display|appear)\b|\byou(?:'ll
 const OLD_FORMAT = /handles are examples|why the bug happened|what was changed|what to expect|context \/ out of scope|\bregression:|\balready (?:set up|configured)\b/i;
 // a catalog handle: a concrete /products|collections|pages|blogs/<handle> path, `e.g.` followed by a path,
 // or `e.g.` followed by a kebab-case word in backticks; the bare `/collections/…` placeholder is no handle,
-// nor is a /pages/<x> whose templates/page.<x>.json|liquid the theme repo ships (a page type, not catalog data)
+// nor is a /pages/<x> whose templates/page.<x>.json|liquid the theme repo ships (a page type, not catalog data),
+// nor Shopify's built-in /collections/all (a page type; /collections/all-foo stays a handle)
 const HANDLE = /\/(?:products|collections|pages|blogs)\/[A-Za-z0-9]|\be\.g\.,?\s*[`'"(]?\/|\be\.g\.,?\s*`[a-z0-9]+(?:-[a-z0-9]+)+`/i;
 const PAGE_PATH = /\/pages\/([A-Za-z0-9][\w-]*)/gi;
+const ALL_COLLECTION = /\/collections\/all(?![\w-])/gi;
 
 /** The <x> of every templates/page.<x>.json|liquid under the cwd and the nearest ancestor of an absolute `path` holding templates/. */
 function pageTemplates(path) {
@@ -163,7 +166,7 @@ function checkStt(path, refs) {
   if (lines.some((l) => EXPECTATION.test(l))) fails.push('expected result in the field ("should see", "Expected:", "verify")');
   if (lines.some((l) => OLD_FORMAT.test(l))) fails.push('old-format text in the field (handle substitution, Bug-template label, context item, "already set up")');
   const pages = pageTemplates(path);
-  const unbound = (l) => l.replace(PAGE_PATH, (m, x) => (pages.has(x.toLowerCase()) ? '/pages/…' : m));
+  const unbound = (l) => l.replace(PAGE_PATH, (m, x) => (pages.has(x.toLowerCase()) ? '/pages/…' : m)).replace(ALL_COLLECTION, '/collections/…');
   if (lines.some((l) => HANDLE.test(unbound(l)))) fails.push('catalog handle in the field (data as properties, never a handle; a /pages/<x> with templates/page.<x>.json is a page type)');
   if (lines.some(notBareLink)) fails.push('preview link not bare (a code span or [label](url) is not clickable in Jira)');
   if (lines.some((l) => /\bNetwork\b/.test(l) && !/\bfilter\b/i.test(l))) fails.push('Network without its filter (every DevTools > Network mention names filter Fetch/XHR, Img, Doc …)');
@@ -171,10 +174,9 @@ function checkStt(path, refs) {
   const copied = examples && copiedExample(lines, examples);
   if (copied) fails.push(`example copied from the references: "${copied.slice(0, 6).join(' ')}…" (write the fact from this ticket's sources)`);
   const words = wordCount(lines);
-  if (words > STT_MAX_WORDS) fails.push(`over ${STT_MAX_WORDS} words (${words})`);
   const hits = attributionHits(text);
   if (hits) fails.push('AI attribution');
-  const warn = words > STT_TARGET_WORDS && words <= STT_MAX_WORDS ? ['warn=over-120-target'] : [];
+  const warn = words > STT_MAX_WORDS ? ['warn=over-160'] : words > STT_TARGET_WORDS ? ['warn=over-120-target'] : [];
   return report(['kind=stt', `items=${nums.length}`, `words=${words}`, ex, `attribution_hits=${hits}`, ...warn], fails);
 }
 

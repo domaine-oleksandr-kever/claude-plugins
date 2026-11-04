@@ -6,7 +6,7 @@ drafter's `mode: jira` turn (create-pull-request Phase 2 step 2) writes `jira-co
 
 ## Spawn
 `Agent(subagent_type: "fe:<drafter>", prompt: <brief>)` — **no `model`**: the frontmatter pins it
-(sonnet / haiku), and a passed model overrides the pin. A drafter spawn **is** the delegation:
+(opus / haiku), and a passed model overrides the pin. A drafter spawn **is** the delegation:
 base's edit-delegation rule (`Agent(model: …)` for every file change) does not apply to it, and the
 drafter's own `Write` is the file change — never wrap it in another agent.
 Keep the agent id or name the result gives: every later turn goes to that same agent.

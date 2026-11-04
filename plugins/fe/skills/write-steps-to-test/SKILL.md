@@ -23,7 +23,7 @@ Operating mode: **Phase 1 is ingest** (ticket, linked docs, the branch facts); P
 - Read the ticket via the **`base:jira-reader` subagent** (Atlassian MCP) — AC, TA, issue type, links, comments, attachments; the optional write-back is **delegated to the `base:jira-writer` subagent** (the ✋ approval stays in the main loop).
 - **Never proceed past the ✋ checkpoint** without explicit developer confirmation.
 - **Text written for an agent is never published to a person** — briefs, workspace notes and instructions to yourself or the developer stay out of the field.
-- **Drafting is delegated to the `fe:stt-drafter` subagent** (sonnet, pinned in its frontmatter — spawn it with no `model`); the loop — spawn, receipt check, ESCALATE relay, SendMessage continuation, questions, edits, caps — is `<fe root>/references/drafter-loop.md` (read it now).
+- **Drafting is delegated to the `fe:stt-drafter` subagent** (opus, pinned in its frontmatter — spawn it with no `model`); the loop — spawn, receipt check, ESCALATE relay, SendMessage continuation, questions, edits, caps — is `<fe root>/references/drafter-loop.md` (read it now).
 - **HARD RULE — the draft never enters this context.** You never `Read`, `cat`, quote or paraphrase `steps-to-test.md`; you show its path (clickable), the drafter's `unconfirmed` list and its questions — nothing else of it. Every change goes back to the same drafter; neither you nor the developer edits the file.
 
 ---

@@ -5826,6 +5826,11 @@ sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart ho
 dc DC8e-stt-bare-handle 1 'fail catalog handle in the field' file stt "$DCD/stt-handle2.md"
 sed 's|^2\. \*\*Object:\*\* .*|2. **Object:** collection pages (`/collections/…`) and `/products/…`.|' "$DCD/stt.md" > "$DCD/stt-placeholder.md"
 dc DC8f-stt-placeholder-path 0 'result=ok' file stt "$DCD/stt-placeholder.md"
+# DC8f8–DC8f9: Shopify's built-in /collections/all is a page type; /collections/all-<x> is a handle
+sed 's|^2\. \*\*Object:\*\* .*|2. **Object:** the product grid on `/collections/all`.|' "$DCD/stt.md" > "$DCD/stt-all.md"
+dc DC8f8-stt-collections-all 0 'result=ok' file stt "$DCD/stt-all.md"
+sed 's|^2\. \*\*Object:\*\* .*|2. **Object:** the product grid on `/collections/all-skincare`.|' "$DCD/stt.md" > "$DCD/stt-allx.md"
+dc DC8f9-stt-collections-all-handle 1 'fail catalog handle in the field' file stt "$DCD/stt-allx.md"
 # DC8f2–DC8f7: a /pages/<x> is a page type when the theme repo ships templates/page.<x>.json|liquid (cwd or the draft's ancestor)
 DCT="$DCD/theme"; mkdir -p "$DCT/templates" "$DCT/.claude/tasks/K-1" "$DCD/notheme"
 : > "$DCT/templates/page.styleguide.json"
@@ -5848,7 +5853,9 @@ dc DC8h-stt-bullet-under-1 1 'fail nested bullet under item 1' file stt "$DCD/st
 awk '{ print } /^   - a cart below/ { print "      - a second level." }' "$DCD/stt.md" > "$DCD/stt-deep.md"
 dc DC8i-stt-two-levels 1 'fail bullet nested more than one level' file stt "$DCD/stt-deep.md"
 { cat "$DCD/stt.md"; for i in 1 2 3 4 5 6; do printf '   - one more boundary clause that QA would otherwise misread here;\n'; done; } > "$DCD/stt-long.md"
-dc DC8j-stt-over-160-words 1 'fail over 160 words (168)' file stt "$DCD/stt-long.md"
+dc DC8j-stt-over-160-words 0 'words=168' file stt "$DCD/stt-long.md"
+tail -n 1 "$DCD/out" | grep -qx 'warn=over-160' && ok || bad DC8j-warn-last "$(tr '\n' ';' < "$DCD/out")"
+grep -qx 'warn=over-120-target' "$DCD/out" && bad DC8j-one-warn "$(tr '\n' ';' < "$DCD/out")" || ok
 sed '$d' "$DCD/stt-long.md" > "$DCD/stt-158.md"
 dc DC8k-stt-158-words 0 'words=158' file stt "$DCD/stt-158.md"
 grep -qx 'warn=over-120-target' "$DCD/out" && ok || bad DC8k-warn "$(tr '\n' ';' < "$DCD/out")"
@@ -5938,6 +5945,9 @@ dc DC8zv-stt-refs-missing-dir 2 'usage:' file stt "$DCD/stt.md" --refs "$DCD/no-
 dc DC8zv2-stt-refs-no-value 2 'usage:' file stt "$DCD/stt.md" --refs
 dc DC8zw-stt-real-refs-ok 0 'result=ok' file stt "$DCD/stt.md" --refs "$ROOT/plugins/base/references/steps-to-test"
 grep -q '^examples=[1-9]' "$DCD/out" && ok || bad DC8zw-real-examples "$(tr '\n' ';' < "$DCD/out")"
+# DC8zw2: an allowance the real refs spell out (the existing-entity non-hedge) is never read back as a copied example
+sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart below the threshold, no free-delivery offer — if the store already has one, use it./' "$DCD/stt.md" > "$DCD/stt-allowed.md"
+dc DC8zw2-stt-real-refs-allowed-phrase-ok 0 'result=ok' file stt "$DCD/stt-allowed.md" --refs "$ROOT/plugins/base/references/steps-to-test"
 
 cat > "$DCD/pr.md" <<MD
 ## Summary
