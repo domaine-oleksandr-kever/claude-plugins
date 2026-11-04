@@ -61,8 +61,24 @@ const STT_MAX_WORDS = 160;
 const EXPECTATION = /\bshould (?:now )?(?:see|show|display|appear)\b|\byou(?:'ll| will) see\b|\bexpected(?: results?)?\s*:|\bexpected results?\b|\bresult\s*:|\bverify\b|\bconfirm that\b/i;
 const OLD_FORMAT = /handles are examples|why the bug happened|what was changed|what to expect|context \/ out of scope|\bregression:|\balready (?:set up|configured)\b/i;
 // a catalog handle: a concrete /products|collections|pages|blogs/<handle> path, `e.g.` followed by a path,
-// or `e.g.` followed by a kebab-case word in backticks; the bare `/collections/…` placeholder is no handle
+// or `e.g.` followed by a kebab-case word in backticks; the bare `/collections/…` placeholder is no handle,
+// nor is a /pages/<x> whose templates/page.<x>.json|liquid the theme repo ships (a page type, not catalog data)
 const HANDLE = /\/(?:products|collections|pages|blogs)\/[A-Za-z0-9]|\be\.g\.,?\s*[`'"(]?\/|\be\.g\.,?\s*`[a-z0-9]+(?:-[a-z0-9]+)+`/i;
+const PAGE_PATH = /\/pages\/([A-Za-z0-9][\w-]*)/gi;
+
+/** The <x> of every templates/page.<x>.json|liquid under the cwd and the nearest ancestor of an absolute `path` holding templates/. */
+function pageTemplates(path) {
+  const dirs = [nodePath.resolve('templates')];
+  for (let d = nodePath.dirname(path); nodePath.isAbsolute(path); d = nodePath.dirname(d)) {
+    if (fs.existsSync(nodePath.join(d, 'templates'))) { dirs.push(nodePath.join(d, 'templates')); break; }
+    if (d === nodePath.dirname(d)) break;
+  }
+  const out = new Set();
+  for (const dir of dirs) {
+    try { for (const n of fs.readdirSync(dir)) { const m = /^page\.(.+)\.(?:json|liquid)$/i.exec(n); if (m) out.add(m[1].toLowerCase()); } } catch (e) { /* no templates dir */ }
+  }
+  return out;
+}
 
 // a preview link (`preview_theme_id=<digits>`, any host form) in a code span of any backtick run, or
 // behind a [label](url): neither is clickable in Jira; a store host or the bare parameter name may be code
@@ -144,7 +160,9 @@ function checkStt(path, refs) {
   if (/!\[[^\]]*\]\(/.test(text)) fails.push('image in the field (the developer attaches setup screenshots after item 4 by hand)');
   if (lines.some((l) => EXPECTATION.test(l))) fails.push('expected result in the field ("should see", "Expected:", "verify")');
   if (lines.some((l) => OLD_FORMAT.test(l))) fails.push('old-format text in the field (handle substitution, Bug-template label, context item, "already set up")');
-  if (lines.some((l) => HANDLE.test(l))) fails.push('catalog handle in the field (data as properties, never a handle)');
+  const pages = pageTemplates(path);
+  const unbound = (l) => l.replace(PAGE_PATH, (m, x) => (pages.has(x.toLowerCase()) ? '/pages/…' : m));
+  if (lines.some((l) => HANDLE.test(unbound(l)))) fails.push('catalog handle in the field (data as properties, never a handle; a /pages/<x> with templates/page.<x>.json is a page type)');
   if (lines.some(notBareLink)) fails.push('preview link not bare (a code span or [label](url) is not clickable in Jira)');
   if (lines.some((l) => /\bNetwork\b/.test(l) && !/\bfilter\b/i.test(l))) fails.push('Network without its filter (every DevTools > Network mention names filter Fetch/XHR, Img, Doc …)');
   const copied = examples && copiedExample(lines, examples);

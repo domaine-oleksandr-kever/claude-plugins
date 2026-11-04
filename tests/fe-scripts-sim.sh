@@ -5764,6 +5764,7 @@ done
 # fixture proves it); the attribution rows mirror base hooks/mods/tests/guards.test.ts.
 DC="$ROOT/plugins/fe/scripts/drafter-check.cjs"
 DCD="$TMP/dc"; mkdir -p "$DCD"
+HND_MSG='fail catalog handle in the field (data as properties, never a handle; a /pages/<x> with templates/page.<x>.json is a page type)'
 SENT="KIWI-SENTINEL-SENTENCE"
 dc() { # dc <label> <want-rc> <want-substr|-> <args…> (stdin passes through)
   local label="$1" want="$2" sub="$3"; shift 3
@@ -5820,11 +5821,26 @@ dc DC8b-stt-should-see 1 'fail expected result in the field ("should see", "Expe
 sed 's/^   - blank or 0: no threshold banner, by design;/   - Expected result: no banner;/' "$DCD/stt.md" > "$DCD/stt-expected.md"
 dc DC8c-stt-expected-result 1 'fail expected result in the field' file stt "$DCD/stt-expected.md"
 sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart below the threshold, e.g. \/products\/silk-foundation./' "$DCD/stt.md" > "$DCD/stt-handle.md"
-dc DC8d-stt-eg-handle 1 'fail catalog handle in the field (data as properties, never a handle)' file stt "$DCD/stt-handle.md"
+dc DC8d-stt-eg-handle 1 'fail catalog handle in the field (data as properties, never a handle; a /pages/<x> with templates/page.<x>.json is a page type)' file stt "$DCD/stt-handle.md"
 sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart holding `\/products\/silk-foundation`./' "$DCD/stt.md" > "$DCD/stt-handle2.md"
 dc DC8e-stt-bare-handle 1 'fail catalog handle in the field' file stt "$DCD/stt-handle2.md"
 sed 's|^2\. \*\*Object:\*\* .*|2. **Object:** collection pages (`/collections/…`) and `/products/…`.|' "$DCD/stt.md" > "$DCD/stt-placeholder.md"
 dc DC8f-stt-placeholder-path 0 'result=ok' file stt "$DCD/stt-placeholder.md"
+# DC8f2–DC8f7: a /pages/<x> is a page type when the theme repo ships templates/page.<x>.json|liquid (cwd or the draft's ancestor)
+DCT="$DCD/theme"; mkdir -p "$DCT/templates" "$DCT/.claude/tasks/K-1" "$DCD/notheme"
+: > "$DCT/templates/page.styleguide.json"
+sed 's|^2\. \*\*Object:\*\* .*|2. **Object:** the **Swatch** block on `/pages/styleguide`.|' "$DCD/stt.md" > "$DCT/.claude/tasks/K-1/steps-to-test.md"
+dc DC8f2-stt-template-page-ancestor 0 'result=ok' file stt "$DCT/.claude/tasks/K-1/steps-to-test.md"
+DCW="$PWD"; cd "$DCT"; dc DC8f3-stt-template-page-cwd 0 'result=ok' file stt .claude/tasks/K-1/steps-to-test.md; cd "$DCW"
+cp "$DCT/.claude/tasks/K-1/steps-to-test.md" "$DCD/notheme/steps-to-test.md"
+dc DC8f4-stt-page-no-template 1 "$HND_MSG" file stt "$DCD/notheme/steps-to-test.md"
+sed 's|/pages/styleguide|/pages/styleguide-2|' "$DCT/.claude/tasks/K-1/steps-to-test.md" > "$DCT/.claude/tasks/K-1/stt-2.md"
+dc DC8f5-stt-page-other-template 1 "$HND_MSG" file stt "$DCT/.claude/tasks/K-1/stt-2.md"
+: > "$DCT/templates/page.about.liquid"
+sed 's|/pages/styleguide|/pages/about|' "$DCT/.claude/tasks/K-1/steps-to-test.md" > "$DCT/.claude/tasks/K-1/stt-3.md"
+dc DC8f6-stt-template-page-liquid 0 'result=ok' file stt "$DCT/.claude/tasks/K-1/stt-3.md"
+sed 's|`/pages/styleguide`|`/pages/styleguide` and `/pages/about-us`|' "$DCT/.claude/tasks/K-1/steps-to-test.md" > "$DCT/.claude/tasks/K-1/stt-4.md"
+dc DC8f7-stt-page-mixed-line 1 "$HND_MSG" file stt "$DCT/.claude/tasks/K-1/stt-4.md"
 awk '{ print } /^2\. / { print "   - the cart drawer row." }' "$DCD/stt.md" > "$DCD/stt-nest2.md"
 dc DC8g-stt-bullet-under-2 1 'fail nested bullet under item 2 (only under items 3 and 4)' file stt "$DCD/stt-nest2.md"
 awk '{ print } /^1\. / { print "   - Market: United Kingdom." }' "$DCD/stt.md" > "$DCD/stt-nest1.md"
