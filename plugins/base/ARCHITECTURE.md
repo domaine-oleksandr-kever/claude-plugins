@@ -118,7 +118,9 @@ draws `base.progress` and its hints name `/base:save-task-context`; its Log pane
   slim; `/base-doctor` adds what the session loaded (`slim-live`, `conventions`) and each MCP
   server's `$.mcp.connect` answer. A slim the install record lacks but the session loaded is a WARN.
   Its `copy:<name>` rows compare each install with the claude.ai-synced copy beside it and name the one
-  this session loaded: base's root, the other plugins' `start` line in the `--log-dir` the mod passes.
+  this session loaded: base's root; for the other plugins the cache version dir whose `.in_use/<pid>` the
+  Claude Code process holding base's root also holds, else their `start` line in the `--log-dir` the mod passes
+  (`sessionPids` / `heldVersions` / `loadedVersion` in `hooks/conventions.cjs`, the rule the dogfood versions line uses).
 
 ## 5. What stays a script, and why
 

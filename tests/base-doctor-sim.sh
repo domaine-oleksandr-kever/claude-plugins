@@ -309,7 +309,8 @@ expect CD42-cache-prune-rules 0 "WARN  cache" "stale versions in $C/domaine: sli
 
 # ---------------------------------------------------------------------------------- copies --
 # A plugin with both an install record and a claude.ai-synced copy gets a copy:<name> row: which copy this session
-# loaded (base: its own root; the others: their start line in the session log), WARN when the synced one is older.
+# loaded (base: its own root; the others: the cache version dir this session holds, else their start line in the
+# session log), WARN when the synced one is older.
 HY="$TMP/hcopies"; SY="$HY/.claude/plugins/synced/acc_1"; LY="$TMP/logs-copies/s1"; mkdir -p "$LY"
 mkhome "$HY" "$(installed "$SLIM_USER"',"base@domaine":[{"scope":"user","installPath":"/c/base/0.9.1","version":"0.9.1"}],"fe@domaine":[{"scope":"user","installPath":"/c/fe/0.5.0","version":"0.5.0"}]')" \
   '{"enabledPlugins":{"slim@domaine":true,"base@domaine":true,"fe@domaine":true}}'
@@ -334,6 +335,25 @@ expect CD56-copy-synced-newer 0 "PASS  copy:fe    this session loaded the instal
 synced fe~g5 0.5.0
 run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
 expect CD57-copy-same-version 0 "PASS  copy:fe    this session loaded fe 0.5.0; install fe@domaine 0.5.0 (/c/fe/0.5.0), synced fe@synced 0.5.0 ($SY/fe~g5): the same version"
+# The cache version dir whose .in_use names the Claude Code process holding base's own root is the loaded copy, before
+# the start line (the hook's versions-line rule); a held copy other than the install is a session started before the update.
+KY="$TMP/cache-copies/fe"; IY="$HY/.claude/plugins/installed_plugins.json"; cp "$IY" "$IY.orig"
+sed -i.bak "s#/c/fe/0.5.0#$KY/0.5.0#" "$IY"
+mkdir -p "$KY/0.5.0/.in_use" "$KY/0.4.0/.in_use" "$P/.in_use"; : > "$P/.in_use/$$"; : > "$KY/0.5.0/.in_use/$$"; : > "$KY/0.4.0/.in_use/2147483646"
+rm "$LY/fe.jsonl"
+run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD57a-copy-held-install 0 "PASS  copy:fe    this session loaded fe 0.5.0 (its .in_use marker); install fe@domaine 0.5.0 ($KY/0.5.0), synced fe@synced 0.5.0 ($SY/fe~g5): the same version" "!no start line"
+rm "$KY/0.5.0/.in_use/$$"; : > "$KY/0.4.0/.in_use/$$"; printf '{"plugin":"fe","version":"0.5.0","kind":"start"}\n' > "$LY/fe.jsonl"
+run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD57b-copy-held-older 0 "WARN  copy:fe    this session runs fe 0.4.0 (its .in_use marker), older than the install 0.5.0; install fe@domaine 0.5.0 ($KY/0.5.0), synced fe@synced 0.5.0 ($SY/fe~g5) — restart the session to load 0.5.0"
+rm "$KY/0.4.0/.in_use/$$" "$LY/fe.jsonl"
+run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD57c-copy-none-held 0 "PASS  copy:fe    no start line from fe in $LY: the loaded copy is unknown; install fe@domaine 0.5.0 ($KY/0.5.0)" "!.in_use marker"
+KB="$TMP/cache-copies/base/0.9.1"; mkplugin "$KB"; mkdir -p "$KB/.in_use"; : > "$KB/.in_use/$$"
+sed -i.bak "s#/c/base/0.9.1#${KB%/*}/0.9.2#; s#\"version\":\"0.9.1\"#\"version\":\"0.9.2\"#" "$IY"
+run --root "$KB" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD57d-copy-base-held-older 0 "WARN  copy:base  this session runs base 0.9.1 (its .in_use marker), older than the install 0.9.2;" "restart the session to load 0.9.2" "!neither copy"
+mv "$IY.orig" "$IY"; rm -rf "$P/.in_use"; printf '{"plugin":"fe","version":"0.5.0","kind":"start"}\n' > "$LY/fe.jsonl"
 printf '{"enabledPlugins":{"slim@domaine":true,"base@domaine":true,"fe@domaine":true,"base@synced":false}}\n' > "$HY/.claude/settings.json"
 run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
 expect CD58-copy-synced-off 0 "PASS  copy:base  install base@domaine 0.9.1 (/c/base/0.9.1), synced base@synced 0.8.0 ($SY/base~g2); the synced copy is off (\"base@synced\": false)"

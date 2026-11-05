@@ -17,7 +17,7 @@
  *
  * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, base-tmp, event-log,
  * copy:<name> (per Domaine plugin with both an install record and a claude.ai-synced copy: which one this
- * session loaded and whether the synced one is older: WARN), cache (only when the plugin cache holds a Domaine version no install record names: WARN), delegate (the
+ * session loaded (the held cache dir, else the start line) and whether it is not the install or the synced one is older: WARN), cache (only when the plugin cache holds a Domaine version no install record names: WARN), delegate (the
  * edit-delegation model and why; SKIP when BASE_EDIT_MODEL=0), switches (only when a BASE_* switch holds a value outside its README domain: WARN),
  * zsh-glob (only when the login shell is zsh: WARN when no .zshenv/.zshrc under ZDOTDIR or home turns nomatch off). Every row is one
  * PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads
@@ -33,6 +33,7 @@ const { spawnSync } = require('child_process');
 const { baseTmpStats, parseTtl, SCRATCH_ROOT_REL, DEFAULT_TTL_HOURS } = require('./scratch-hygiene.cjs');
 const { parseTimeout, DEFAULT_TIMEOUT_S } = require('./shopify-validate.cjs');
 const { editDelegation, whyText, parseOverride } = require('./edit-delegation.cjs');
+const { sessionPids, heldVersions, loadedVersion, startVersion } = require('../hooks/conventions.cjs');
 
 const MIN_NODE_MAJOR = 18;
 // Plugin names the engine refuses to load a hooks module for (validate still passes).
@@ -428,29 +429,17 @@ function checkCache(claudeDir) {
 
 const DOMAINE = ['slim', 'band', 'base', 'fe', 'be', 'qa', 'pm'];
 
-/** The version on the last `start` line of `<dir>/<name>.jsonl`, or null. */
-function startVersion(dir, name) {
-  let lines = [];
-  try { lines = fs.readFileSync(path.join(dir, name + '.jsonl'), 'utf8').split('\n'); } catch { return null; }
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (!lines[i].includes('"kind":"start"')) continue;
-    try {
-      const l = JSON.parse(lines[i]);
-      if (l.plugin === name && typeof l.version === 'string' && l.version) return l.version;
-    } catch {}
-  }
-  return null;
-}
-
 /**
  * One `copy:<name>` row per Domaine plugin with both an install record and a claude.ai-synced copy: which one this
- * session loaded (base: its own root; the others: their start line in the session log) and how the versions compare.
- * A synced copy older than the install WARNs, as a session that loads it (the desktop app, a cloud session) runs the
- * older build; any other pair PASSes.
+ * session loaded (base: its own root; the others: the cache version dir this session's Claude Code holds, else their
+ * start line in the session log, the hook's versions-line rule) and how the versions compare. A held copy other than the
+ * install WARNs (the session started before the update: restart it); a synced copy older than the install WARNs, as a
+ * session that loads it (the desktop app, a cloud session) runs the older build; any other pair PASSes.
  */
 function checkCopies(pluginRoot, claudeDir, projectDir, enabled, logDir) {
   const ownRoot = /[\\/]plugins[\\/]synced[\\/]/.test(pluginRoot);
   const own = (readJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json')) || {}).version;
+  const pids = sessionPids(pluginRoot);
   for (const name of DOMAINE) {
     const inst = recordedPlugin(name, claudeDir, projectDir, enabled);
     const sync = syncedPlugin(name, claudeDir, enabled);
@@ -461,14 +450,21 @@ function checkCopies(pluginRoot, claudeDir, projectDir, enabled, logDir) {
       pass('copy:' + name, both + '; the synced copy is off ("' + sync.key + '": false)');
       continue;
     }
-    const v = name === 'base' ? (typeof own === 'string' ? own : null) : logDir ? startVersion(logDir, name) : null;
+    const held = name === 'base' && ownRoot ? [] : heldVersions(inst.installPath, pids);
+    const v = name === 'base' ? (typeof own === 'string' ? own : null) : loadedVersion(held, logDir ? startVersion(logDir, name) : null);
+    const marker = held.includes(v) ? ' (its .in_use marker)' : '';
+    if (marker && v !== inst.version) {
+      warn('copy:' + name, 'this session runs ' + name + ' ' + v + marker + ', ' + (versionKey(v) < versionKey(inst.version) ? 'older than' : 'not') +
+        ' the install ' + inst.version + '; ' + both + ' — restart the session to load ' + inst.version);
+      continue;
+    }
     const loaded = name === 'base' && ownRoot ? 'synced'
       : v === null ? null
       : inst.version === sync.version ? (v === inst.version ? 'both' : 'other')
       : name !== 'base' && v === sync.version ? 'synced' : v === inst.version ? 'install' : 'other';
     const head = loaded === 'synced' ? 'this session loaded the synced copy ' + sync.version
-      : loaded === 'install' ? 'this session loaded the install ' + inst.version
-      : loaded === 'both' ? 'this session loaded ' + name + ' ' + v
+      : loaded === 'install' ? 'this session loaded the install ' + inst.version + marker
+      : loaded === 'both' ? 'this session loaded ' + name + ' ' + v + marker
       : loaded === 'other' ? 'this session loaded ' + name + ' ' + v + ', neither copy (a --plugin-dir load?)'
       : 'no start line from ' + name + ' in ' + (logDir || 'a session log') + ': the loaded copy is unknown';
     if (inst.version === sync.version) {

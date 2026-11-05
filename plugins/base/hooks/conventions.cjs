@@ -145,6 +145,31 @@ function startVersion(dir, p) {
   return null;
 }
 
+/** The pids `root`'s `.in_use` names, narrowed to the parent process when it is one of them: this session's Claude Code. */
+function sessionPids(root) {
+  const mine = holders(root);
+  return mine.includes(String(process.ppid)) ? [String(process.ppid)] : mine;
+}
+
+/** The versions (manifest, else dir name) of the cache dirs beside `installPath` whose `.in_use` names one of `pids`. */
+function heldVersions(installPath, pids) {
+  if (!pids.length || typeof installPath !== 'string') return [];
+  const parent = path.dirname(installPath);
+  let vs = [];
+  try {
+    vs = fs.readdirSync(parent).filter((v) => holders(parent + '/' + v).some((p) => pids.includes(p)));
+  } catch {}
+  return vs.map((d) => {
+    const v = (readJson(parent + '/' + d + '/.claude-plugin/plugin.json') || {}).version;
+    return typeof v === 'string' && v ? v : d;
+  });
+}
+
+/** The loaded version: the one held version, else the start line when it names a held one or none is held; null otherwise. */
+function loadedVersion(held, started) {
+  return held.length === 1 ? held[0] : held.length ? (held.includes(started) ? started : null) : started || null;
+}
+
 /**
  * `slim 0.13.0, fe 0.14.0 (installed 0.15.0), qa (installed 0.5.0), …`: what each plugin loaded (base's own manifest; for a
  * sibling the one cache version dir this session's Claude Code holds, else its start line in this session's log when that names
@@ -161,20 +186,7 @@ function versionsLine(cwd, sid) {
   }
   const ownRec = (r) => typeof r.installPath === 'string' && (r.installPath === ROOT || path.dirname(r.installPath) === path.dirname(ROOT));
   const mk = (recs.find(([n, , r]) => n === 'base' && ownRec(r)) || [])[1];
-  const mine = holders(ROOT);
-  const pids = mine.includes(String(process.ppid)) ? [String(process.ppid)] : mine;
-  const held = (r) => {
-    if (!pids.length || typeof r.installPath !== 'string') return [];
-    const parent = path.dirname(r.installPath);
-    let vs = [];
-    try {
-      vs = fs.readdirSync(parent).filter((v) => holders(parent + '/' + v).some((p) => pids.includes(p)));
-    } catch {}
-    return vs.map((d) => {
-      const v = (readJson(parent + '/' + d + '/.claude-plugin/plugin.json') || {}).version;
-      return typeof v === 'string' && v ? v : d;
-    });
-  };
+  const pids = sessionPids(ROOT);
   const dir = logDir(sid);
   const enabled = {};
   for (const f of [cfg + '/settings.json', cwd + '/.claude/settings.json', cwd + '/.claude/settings.local.json']) {
@@ -199,10 +211,10 @@ function versionsLine(cwd, sid) {
   for (const p of PLUGINS) {
     const rec = recs.find(([n, m]) => n === p && m === mk) || recs.find(([n]) => n === p);
     const inst = rec && typeof rec[2].version === 'string' && rec[2].version ? rec[2].version : null;
-    const vs = rec ? held(rec[2]) : [];
+    const vs = rec ? heldVersions(rec[2].installPath, pids) : [];
     const started = dir && startVersion(dir, p);
     const v = p === 'base' ? (typeof own === 'string' && own ? own : null)
-      : vs.length === 1 ? vs[0] : vs.length ? (vs.includes(started) ? started : null) : started || (rec ? null : syncedVersion(p));
+      : loadedVersion(vs, started) || (vs.length || rec ? null : syncedVersion(p));
     if (v === null && inst === null && p !== 'base' && !enabled[p]) continue;
     out.push(v ? p + ' ' + v + (inst && inst !== v ? ' (installed ' + inst + ')' : '') : inst ? p + ' (installed ' + inst + ')' : p + ' (version unknown)');
   }
@@ -384,7 +396,7 @@ function main(argv) {
   }
 }
 
-module.exports = { startPart, subagentText, stopReason, versionsLine, login, dogfoodOn, logDir, writeMarker, readStdin, editDecision };
+module.exports = { startPart, subagentText, stopReason, versionsLine, sessionPids, heldVersions, loadedVersion, startVersion, login, dogfoodOn, logDir, writeMarker, readStdin, editDecision };
 
 if (require.main === module) {
   try {
