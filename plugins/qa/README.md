@@ -20,7 +20,7 @@ store registry (`<base root>/scripts/qa-stores.cjs`), the shared references and 
 MCP server ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with slim
 too.
 
-Current release: **qa v0.5.0**.
+Current release: **qa v0.5.1**.
 
 ## Status
 
@@ -92,7 +92,7 @@ Where the log folder is missing or not writable, the marker goes to the spare fo
 | Name | Holds |
 |---|---|
 | `root` | `qa plugin root: <path>`, the directory qa's skill and doctor start from |
-| `passwords` | one paragraph: a dev/UAT storefront password is low-sensitivity — the registry (`<base root>/scripts/qa-stores.cjs get <store> --field password`; a bare `get` prints JSON, never a fill value) is the preferred source when it knows the store, a password from chat or a memory/workspace note is as good; it may appear in chat, notes, browser fill code and on a Bash line, never in a Jira comment, Steps to Test, a PR body or anything else the client or QA team reads, a committed theme-repo file or a screenshot attached to a ticket; the registry file is never read directly |
+| `passwords` | one paragraph: a dev/UAT storefront password is low-sensitivity — the registry (`<base root>/scripts/qa-stores.cjs get <store> --field password`; a bare `get` prints JSON, never a fill value) is the preferred source when it knows the store, a password from chat or a memory/workspace note is as good; it may appear in chat, notes, a browser MCP fill and on a Bash line, never in a Jira comment, Steps to Test, a PR body or anything else the client or QA team reads, a committed theme-repo file or a screenshot attached to a ticket; the registry file is never read directly |
 
 `/qa:preflight` itself holds the store-access posture: storefront only, no Admin or theme write.
 **Subagents** get nothing from qa: its `hooks.json` has no `SubagentStart` entry.

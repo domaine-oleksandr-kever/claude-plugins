@@ -38,7 +38,7 @@ Not for this skill to read: `<base root>/references/steps-to-test-format.md` (ro
 - **Passwords** — a dev/UAT storefront password is low-sensitivity. Prefer `qa-stores.cjs get <store>
   --field password` when the registry knows the store (its raw output is the browser fill value as is; a
   bare `get` prints JSON, never a fill value); a password the person gave in chat or a memory or workspace
-  note holds is as good. It may appear in chat, notes, browser fill code and on a Bash line, never in a
+  note holds is as good. It may appear in chat, notes, a browser MCP fill and on a Bash line, never in a
   Jira comment, Steps to Test, a PR body, the brief or anything else the client or QA team reads, a
   committed theme-repo file or a screenshot attached to a ticket. The registry file is never read
   directly.
