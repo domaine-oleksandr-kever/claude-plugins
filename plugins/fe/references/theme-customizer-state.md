@@ -29,7 +29,14 @@ restore step and does not parse in `jq`.
 `where-used <section-type>` answers "where is this section used" from the store, never from the
 repo's (stale) `templates/*.json`: it scans `templates/**/*.json` and `sections/*.json` of `--theme
 <id>`, else the live theme, and prints `store=… theme=… file=… section=<instance id>` per hit and a
-final `count=` line (0 hits is still exit 0). `--stores a,b` asks several stores; `--store` one.
+final `count=` line (0 hits is still exit 0). The Admin API's `templates/*.json` filename pattern
+matches subfolder templates (`templates/customers/account.json`) as well. A file whose body comes
+back as a URL or Base64 instead of text is `note=where_used_body_not_text file=<path>` on stderr and
+adds ` unread=<n>` to the `count=` line: the count then covers the text files only, so re-run
+with `--engine themecli` (it pulls the files) before you answer "not used". A file that does not
+parse is `note=where_used_unparsed file=<path>`. `--stores a,b` asks several stores (`--store` asks one): a
+store that does not hold `--theme` is `note=where_used_skipped … reason=theme_not_found` and counts
+in `no_theme=` on the last line. Any other failed store counts in `unreachable=`.
 
 Inspection reads go through `--out` (the task workspace `tmp/`, mktemp when none) — a
 `settings_data.json` is 30–150 KB of context burn inline, and `get` without `--out` suppresses any

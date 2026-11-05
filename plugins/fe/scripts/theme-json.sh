@@ -137,13 +137,19 @@
 # of that type" from the STORE (repo copies of templates/*.json are stale): on --theme, else the
 # store's live theme (role MAIN), it scans templates/**/*.json and sections/*.json and prints one
 # `store=<domain> theme=<id> file=<path> section=<instance id>` per hit, then
-# `count=<n> store=<domain> theme=<id> files=<scanned> engine=<gql|themecli>` (exit 0, also at 0
+# `count=<n> store=<domain> theme=<id> files=<scanned> engine=<gql|themecli>[ unread=<n>]` (exit 0, also at 0
 # hits). A file that does not parse after stripping /*…*/ is `note=where_used_unparsed file=<path>`
-# on stderr. One store: --store / $SHOPIFY_STORE / the toml's, as every other command. --stores a,b
-# runs it once per store (401/403 under auto retried on the theme CLI, as locate does); a failed
-# store is `note=where_used_skipped store=<domain>`, and the last line is
-# `count=<n> stores=<k> searched=<a,b>[ unreachable=<j>]`. gql reads theme.files with filenames
-# templates/*.json + sections/*.json (paged); themecli pulls the same with --only globs into a temp dir.
+# on stderr; a gql file whose body comes back as a URL or Base64 instead of text is
+# `note=where_used_body_not_text file=<path>` and counted in ` unread=<n>` on the count line (only
+# when n > 0 — the count then covers the text files alone). One store: --store / $SHOPIFY_STORE /
+# the toml's, as every other command. --stores a,b runs it once per store (401/403 under auto
+# retried on the theme CLI, as locate does); a store that does not hold --theme is
+# `note=where_used_skipped store=<domain> reason=theme_not_found theme=<id>`, any other failed store
+# `note=where_used_skipped store=<domain> rc=<rc> (<last error line>)`, and the last line is
+# `count=<n> stores=<k> searched=<a,b>[ unreachable=<j>][ no_theme=<t>][ unread=<u>]`. gql reads
+# theme.files with filenames templates/*.json (which matches subfolders such as
+# templates/customers/*.json too) + sections/*.json, paged; themecli pulls the same with --only
+# globs into a temp dir.
 #
 # Output: `themes` prints one {"id","name","role"} JSON per line (gid + UPPERCASE role on every
 # engine); `get` prints the raw file body (--out preserves exact bytes) — an inline body over
@@ -1098,7 +1104,7 @@ locate_theme() {
 }
 
 # --------------------------------------------------------------- where-used --
-WU_NID=""; WU_DOMAIN=""; WU_DIR=""; WU_ENGINE=""
+WU_NID=""; WU_DOMAIN=""; WU_DIR=""; WU_ENGINE=""; WU_UNREAD=0
 # --theme, else the store's live theme. $1 = the engine's `themes` lister (gql returns 1 = fall back).
 wu_resolve_theme() {
   if [ -n "$THEME" ]; then WU_NID="$(num_of "$THEME")"; return 0; fi
@@ -1129,7 +1135,7 @@ wu_scan() {
     done <<< "$ids"
   done < <(cd "$WU_DIR" && find templates sections -type f -name '*.json' 2>/dev/null | LC_ALL=C sort)
   [ "$files" -gt 0 ] || echo "note=where_used_no_files engine=$WU_ENGINE theme=$WU_NID (no templates/*.json or sections/*.json came back — nothing was searched)" >&2
-  echo "count=$n store=${WU_DOMAIN:--} theme=$WU_NID files=$files engine=$WU_ENGINE"
+  echo "count=$n store=${WU_DOMAIN:--} theme=$WU_NID files=$files engine=$WU_ENGINE$([ "$WU_UNREAD" -eq 0 ] || printf ' unread=%s' "$WU_UNREAD")"
 }
 
 GQL_WHERE_USED='query FeWhereUsedFiles($id: ID!, $after: String) {
@@ -1163,6 +1169,12 @@ gql_where_used() {
       mkdir -p "$WU_DIR/$(dirname "$fn")"; printf '%s' "$body" > "$WU_DIR/$fn"
     done < <(printf '%s' "$RESP" | jq -j '.data.theme.files.nodes[] | select(.body.content? | type == "string")
       | .filename, "\u0000", .body.content, "\u0000"')
+    # a URL or Base64 body is not fetched: named and counted, so the count is never read as complete
+    while IFS= read -r -d '' fn; do
+      case "$fn" in /*|*..*|*[[:cntrl:]]*) continue ;; templates/*.json|sections/*.json) ;; *) continue ;; esac
+      WU_UNREAD=$((WU_UNREAD + 1))
+      echo "note=where_used_body_not_text file=$fn (the API returned a URL or Base64 body, not text — not searched)" >&2
+    done < <(printf '%s' "$RESP" | jq -j '.data.theme.files.nodes[] | select(.body.content? | type != "string") | .filename, "\u0000"')
     next="$(printf '%s' "$RESP" | jq -r '.data.theme.files.pageInfo | if .hasNextPage then .endCursor // "" else "" end')"
     pages=$((pages + 1))
     [ -n "$next" ] && [ "$pages" -lt 100 ] || break
@@ -1174,6 +1186,10 @@ gql_where_used() {
 cli_where_used() {
   local err
   wu_resolve_theme cli_themes_lines
+  if [ -n "$THEME" ]; then
+    cli_list
+    [ -n "$(theme_list_field "$CLI_LIST" "$WU_NID" id)" ] || { echo "error=theme_not_found theme=$WU_NID (engine=themecli)" >&2; exit 5; }
+  fi
   WU_DOMAIN="$DOMAIN"; WU_ENGINE=themecli
   WU_DIR="$(mktemp -d)"; err="$(mktemp)"; CLEAN+=("$WU_DIR" "$err")
   shopify theme pull --store "$DOMAIN" --theme "$WU_NID" --path "$WU_DIR" \
@@ -1185,7 +1201,7 @@ cli_where_used() {
 
 # --stores: one run of this script per store, the hit lines passed through, one total at the end
 wu_stores() {
-  local cand s seen=" " n=0 skipped=0 total=0 rc searched="" out err line c
+  local cand s seen=" " n=0 skipped=0 no_theme=0 total=0 unread=0 rc searched="" out err line c
   out="$(mktemp)"; err="$(mktemp)"; CLEAN+=("$out" "$err")
   local args=(--engine "$ENGINE")
   [ -n "$THEME" ]    && args+=(--theme "$THEME")
@@ -1205,6 +1221,11 @@ wu_stores() {
       rc=0; "$BASH" "$SCRIPT_DIR/theme-json.sh" where-used "$WU_TYPE" --store "$s" --engine themecli "${args[@]:2}" >"$out" 2>"$err" </dev/null || rc=$?
     fi
     grep -E '^note=' "$err" >&2 || true
+    if [ "$rc" -ne 0 ] && grep -qE '^error=theme_not_found( |$)' "$err"; then
+      no_theme=$((no_theme + 1))
+      echo "note=where_used_skipped store=$s reason=theme_not_found theme=$(num_of "$THEME")" >&2
+      continue
+    fi
     if [ "$rc" -ne 0 ]; then
       skipped=$((skipped + 1))
       echo "note=where_used_skipped store=$s rc=$rc ($(grep -v '^[[:space:]]*$' "$err" | tail -1))" >&2
@@ -1212,12 +1233,13 @@ wu_stores() {
     fi
     while IFS= read -r line; do
       case "$line" in
-        count=*) c="${line%% *}"; total=$((total + ${c#count=})) ;;
+        count=*) c="${line%% *}"; total=$((total + ${c#count=}))
+                 case " $line " in *" unread="*) c="${line##* unread=}"; unread=$((unread + ${c%% *})) ;; esac ;;
         *) printf '%s\n' "$line" ;;
       esac
     done < "$out"
   done < <(printf '%s\n' "$STORES" | tr ',' '\n')
-  echo "count=$total stores=$n searched=${searched:--}$([ "$skipped" -eq 0 ] || printf ' unreachable=%s' "$skipped")"
+  echo "count=$total stores=$n searched=${searched:--}$([ "$skipped" -eq 0 ] || printf ' unreachable=%s' "$skipped")$([ "$no_theme" -eq 0 ] || printf ' no_theme=%s' "$no_theme")$([ "$unread" -eq 0 ] || printf ' unread=%s' "$unread")"
 }
 
 # ------------------------------------------------------------------ dispatch --

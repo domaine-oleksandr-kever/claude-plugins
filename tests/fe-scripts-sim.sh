@@ -108,9 +108,13 @@ Q=""; ST=""; VF=""
 while [ $# -gt 0 ]; do case "$1" in --query) Q="$2"; shift 2 ;; --store) ST="$2"; shift 2 ;; --variables-file) VF="$2"; shift 2 ;; *) shift ;; esac; done
 role="${FAKE_ROLE:-DEVELOPMENT}"
 # where-used: FAKE_WU_PAGE1 / FAKE_WU_PAGE2 (files) answer the first page and the `after` page;
-# a --store equal to FAKE_WU_FAIL_STORE fails the way an unreachable store does
+# a --store equal to FAKE_WU_FAIL_STORE fails the way an unreachable store does, one equal to
+# FAKE_WU_401_STORE answers 401 (an Admin token minted for another store), one equal to
+# FAKE_WU_NOTHEME_STORE does not hold the theme
 if grep -q FeWhereUsedFiles "$Q"; then
   [ -z "${FAKE_WU_FAIL_STORE:-}" ] || [ "$FAKE_WU_FAIL_STORE" != "$ST" ] || { echo "error=stub_store_unreachable store=$ST" >&2; exit 5; }
+  [ -z "${FAKE_WU_401_STORE:-}" ] || [ "$FAKE_WU_401_STORE" != "$ST" ] || { echo "error=http_401 url=https://x/admin/api/graphql.json" >&2; exit 5; }
+  [ -z "${FAKE_WU_NOTHEME_STORE:-}" ] || [ "$FAKE_WU_NOTHEME_STORE" != "$ST" ] || { printf '{"data":{"shop":{"myshopifyDomain":"%s"},"theme":null}}\n' "$ST"; exit 0; }
   if grep -q '"after"' "$VF"; then cat "$FAKE_WU_PAGE2"; else cat "$FAKE_WU_PAGE1"; fi
   exit 0
 fi
@@ -1515,6 +1519,39 @@ if [ "$rc" -eq 0 ] && [ "$(grep -c '^store=.* file=templates/collection.json sec
    && [ "$(tail -1 "$O")" = 'count=1 stores=2 searched=store-a,store-x unreachable=1' ] \
    && grep -q '^note=where_used_skipped store=store-x.myshopify.com rc=5 (.*stub_store_unreachable' "$E"; then ok
 else bad T66g-where-used-stores "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+# T66h: --stores under auto — a store whose Admin API answers 401 is re-run once on the theme CLI and
+# counts as searched, not unreachable
+L="$TMP/tj66h.log"; : > "$L"
+rc=0; FAKE_WU_PAGE1="$WU/p2.json" FAKE_WU_401_STORE=store-b.myshopify.com TJ_CLI_LOG="$L" TJ_PULL_TREE="$WU/tree" \
+  SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" where-used comparison --theme 2 --stores store-a,store-b >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(grep -c '^store=store-b.myshopify.com theme=2 file=templates/' "$O")" -eq 3 ] \
+   && grep -q '^store=stub.myshopify.com theme=2 file=templates/collection.json section=c9$' "$O" \
+   && [ "$(tail -1 "$O")" = 'count=4 stores=2 searched=store-a,store-b' ] \
+   && grep -q '^argv=theme pull --store store-b\.myshopify\.com --theme 2 ' "$L" \
+   && ! grep -q '^note=where_used_skipped' "$E"; then ok
+else bad T66h-where-used-stores-401-falls-back-to-cli "rc=$rc out=$(tr '\n' ';' < "$O") log=$(grep argv "$L" | tr '\n' ';') err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+# T66i: a file whose body is a URL or Base64 (not text) is named on stderr and counted as unread on
+# the count line — a count over the text files alone never reads as complete
+jq -c '.data.theme.files.nodes += [{filename:"templates/page.big.json",body:{url:"https://cdn.example/x"}},
+  {filename:"sections/footer-group.json",body:{contentBase64:"e30="}}]' "$WU/p2.json" > "$WU/p4.json"
+rc=0; FAKE_WU_PAGE1="$WU/p4.json" "$BASH_BIN" "$TJDIR/theme-json.sh" where-used comparison --theme 2 >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(tail -1 "$O")" = 'count=1 store=stub.myshopify.com theme=2 files=1 engine=gql unread=2' ] \
+   && grep -q '^note=where_used_body_not_text file=templates/page.big.json ' "$E" \
+   && grep -q '^note=where_used_body_not_text file=sections/footer-group.json ' "$E"; then ok
+else bad T66i-where-used-body-not-text "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+# T66j: --stores — a store that does not hold --theme is its own reason and key (no_theme=), not
+# unreachable; unread files of a searched store add up on the last line
+rc=0; FAKE_WU_PAGE1="$WU/p4.json" FAKE_WU_NOTHEME_STORE=store-n.myshopify.com \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" where-used comparison --theme 2 --stores store-a,store-n >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(tail -1 "$O")" = 'count=1 stores=2 searched=store-a,store-n no_theme=1 unread=2' ] \
+   && grep -q '^note=where_used_skipped store=store-n.myshopify.com reason=theme_not_found theme=2$' "$E" \
+   && ! grep -q 'unreachable=' "$O"; then ok
+else bad T66j-where-used-stores-no-theme "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+# T66k: themecli with a --theme the CLI listing does not carry is theme_not_found, as on gql
+rc=0; TJ_PULL_TREE="$WU/tree" SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" where-used comparison --theme 99 --engine themecli --store test.myshopify.com >"$O" 2>"$E" || rc=$?
+assert T66k-where-used-themecli-theme-not-found 5 "$rc" "$E" "error=theme_not_found theme=99 (engine=themecli)"
 
 unset FE_THEME_JSON_VERIFY_WAIT
 
