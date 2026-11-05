@@ -56,7 +56,8 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
   the `store=` the script reports → add `--store <that handle>` to every call (brands often have a
   store per region; a custom-domain URL → ask which store; a theme id with no store named →
   `<fe root>/scripts/theme-json.sh locate <id>` prints its `store=`). There plain `create` is refused
-  (`error=overlay_store_mismatch`) — refresh an existing theme. Never fall back to a raw
+  (`error=overlay_store_mismatch`) — refresh an existing theme, or make a NEW preview with
+  `create --name "<name>" --duplicate-of <a theme on that store> --store <that handle>` (below). Never fall back to a raw
   `shopify theme push`.
 - A copy of another store's theme: `create --name "<name>" --duplicate-of <theme> --store <store>
   [--brand <b>]` (brand = a directory name under multi-brand/brands/, e.g. jo-malone, never a
@@ -78,12 +79,11 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    `dev_theme_id`, and `dev_theme_name`. Any `error=` line → the errors reference's
    **`error=` outcomes**, and never read the toml yourself. (`create-preview-theme.sh --help`
    prints the full call shape from the script itself.) **The section is on that store?** For
-   each section or block type the branch changes, grep the target store's live templates for it:
-   the live id from `<fe root>/scripts/theme-json.sh themes --role main`, then
-   `theme-json.sh get --theme <id> --file templates/<name>.json` per template the checkout
-   ships (or the workspace copy of one), both with the `--store` this run uses, searching for
-   `"type": "<type>"`. No template uses it → warn the developer before step 3: the preview
-   would show nothing to review on this store.
+   each section type the branch changes, `<fe root>/scripts/theme-json.sh where-used <type>`
+   with the `--store` this run uses (the live theme's templates and section groups). `count=0`
+   → warn the developer before step 3: the preview would show nothing to review on this store.
+   A block type: `theme-json.sh get --theme <live id> --file templates/<name>.json
+   --strip-comments --out <tmp>/<name>.json` and `jq` it for `"type": "<type>"`.
 2. **Decide the name.**
    - If `theme_name` was given, use it verbatim.
    - Else if `jira_keys` were given, derive it by swapping the `[DEV]`/role prefix of

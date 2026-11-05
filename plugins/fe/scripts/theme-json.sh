@@ -102,6 +102,7 @@
 #   theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--out <file>] [--strip-comments]
 #   theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
 #   theme-json.sh locate <id|gid> [--stores <a,b,c>]
+#   theme-json.sh where-used <section-type> [--theme <id|gid>] [--stores <a,b,c>]
 # Common: [--store <name|domain>] [--engine auto|store|token|themecli] [--env <path>]
 #          [--api-version <v>]   (store domain defaults from shopify.theme.toml)
 #
@@ -131,6 +132,18 @@
 # (an Admin token belongs to one store) is listed once more on the theme CLI. A store whose listing fails is skipped with
 # `note=locate_skipped store=<domain>` and the failure's last line on stderr, counted in
 # `unreachable=<k>` on the not-found line.
+#
+# `where-used <section-type>` (read-only) answers "which templates and section groups hold a section
+# of that type" from the STORE (repo copies of templates/*.json are stale): on --theme, else the
+# store's live theme (role MAIN), it scans templates/**/*.json and sections/*.json and prints one
+# `store=<domain> theme=<id> file=<path> section=<instance id>` per hit, then
+# `count=<n> store=<domain> theme=<id> files=<scanned> engine=<gql|themecli>` (exit 0, also at 0
+# hits). A file that does not parse after stripping /*…*/ is `note=where_used_unparsed file=<path>`
+# on stderr. One store: --store / $SHOPIFY_STORE / the toml's, as every other command. --stores a,b
+# runs it once per store (401/403 under auto retried on the theme CLI, as locate does); a failed
+# store is `note=where_used_skipped store=<domain>`, and the last line is
+# `count=<n> stores=<k> searched=<a,b>[ unreachable=<j>]`. gql reads theme.files with filenames
+# templates/*.json + sections/*.json (paged); themecli pulls the same with --only globs into a temp dir.
 #
 # Output: `themes` prints one {"id","name","role"} JSON per line (gid + UPPERCASE role on every
 # engine); `get` prints the raw file body (--out preserves exact bytes) — an inline body over
@@ -165,6 +178,7 @@ USAGE='Usage:
   theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--out <file>] [--strip-comments]
   theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
   theme-json.sh locate <id|gid> [--stores <a,b,c>]
+  theme-json.sh where-used <section-type> [--theme <id|gid>] [--stores <a,b,c>]
 Common: [--store <name|domain>] [--engine auto|store|token|themecli] [--env <path>]
          [--api-version <v>]   (store domain defaults from shopify.theme.toml)'
 
@@ -185,10 +199,11 @@ RUNNER="$SCRIPT_DIR/shopify-admin-gql.sh"
 command -v jq >/dev/null 2>&1 || { echo "error=jq_not_found" >&2; exit 2; }
 
 CMD="${1:-}"; [ $# -gt 0 ] && shift
-case "$CMD" in themes|get|set|locate) ;; *) echo "error=unknown_command cmd='$CMD' (use themes|get|set|locate; --help prints usage)" >&2; exit 2 ;; esac
+case "$CMD" in themes|get|set|locate|where-used) ;; *) echo "error=unknown_command cmd='$CMD' (use themes|get|set|locate|where-used; --help prints usage)" >&2; exit 2 ;; esac
 
-THEME=""; FILE=""; OUT=""; FROM=""; ROLE_FILTER=""; STRIP=0; STORES=""
+THEME=""; FILE=""; OUT=""; FROM=""; ROLE_FILTER=""; STRIP=0; STORES=""; WU_TYPE=""
 if [ "$CMD" = locate ] && [ $# -gt 0 ]; then case "$1" in -*) ;; *) THEME="$1"; shift ;; esac; fi
+if [ "$CMD" = where-used ] && [ $# -gt 0 ]; then case "$1" in -*) ;; *) WU_TYPE="$1"; shift ;; esac; fi
 ENGINE="auto"; STORE_ARG=""; ENV_ARG=""; APIV_ARG=""
 TOML="${TOML_PATH:-$(default_toml_path)}"
 export TOML_PATH="$TOML"   # the gql runner reads this same file, and walks (and notes) nothing twice
@@ -297,7 +312,7 @@ emit_file() {
     # note is self-describing and a later `set --from <note-file>` fails json validation
     # before any upload (fail-closed). Real snapshots go through --out (byte-exact).
     if [ "$bytes" -gt 8192 ] && [ ! -t 1 ]; then
-      echo "note=large_file bytes=$bytes file=$FILE — body suppressed, this line is NOT the file content; re-run with --out <path> and pull what you need with jq"
+      echo "note=large_file bytes=$bytes file=$FILE — body suppressed, this line is NOT the file content; to read it with jq re-run with --out <path> --strip-comments (plain --out is the raw byte-exact snapshot for restore, and its /*…*/ banner does not parse in jq)"
       return 0
     fi
     cat "$body"; echo
@@ -1082,6 +1097,129 @@ locate_theme() {
   exit 5
 }
 
+# --------------------------------------------------------------- where-used --
+WU_NID=""; WU_DOMAIN=""; WU_DIR=""; WU_ENGINE=""
+# --theme, else the store's live theme. $1 = the engine's `themes` lister (gql returns 1 = fall back).
+wu_resolve_theme() {
+  if [ -n "$THEME" ]; then WU_NID="$(num_of "$THEME")"; return 0; fi
+  local f; f="$(mktemp)"; CLEAN+=("$f")
+  ROLE_FILTER=MAIN
+  "$1" > "$f" || return 1
+  WU_NID="$(jq -r '.id' "$f" 2>/dev/null | head -1)"; WU_NID="${WU_NID##*/}"
+  [ -n "$WU_NID" ] || { echo "error=live_theme_not_found (no theme with role main listed — pass --theme <id>)" >&2; exit 5; }
+}
+
+# one hit line per section instance of $WU_TYPE in every templates/**/*.json and sections/*.json
+# under $WU_DIR, then the count line
+wu_scan() {
+  local rel id s n=0 files=0 ids
+  s="$(mktemp)"; CLEAN+=("$s")
+  while IFS= read -r rel; do
+    files=$((files + 1))
+    if ! { command -v perl >/dev/null 2>&1 && strip_json_comments "$WU_DIR/$rel" > "$s" 2>/dev/null; }; then
+      cat "$WU_DIR/$rel" > "$s"
+    fi
+    ids="$(jq -r --arg t "$WU_TYPE" 'if (.sections | type) == "object"
+        then .sections | to_entries[] | select((.value | type) == "object" and .value.type == $t) | .key
+        else empty end' "$s" 2>/dev/null)" \
+      || { echo "note=where_used_unparsed file=$rel (not JSON after stripping /*…*/ comments — not searched)" >&2; continue; }
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      n=$((n + 1)); echo "store=${WU_DOMAIN:--} theme=$WU_NID file=$rel section=$id"
+    done <<< "$ids"
+  done < <(cd "$WU_DIR" && find templates sections -type f -name '*.json' 2>/dev/null | LC_ALL=C sort)
+  [ "$files" -gt 0 ] || echo "note=where_used_no_files engine=$WU_ENGINE theme=$WU_NID (no templates/*.json or sections/*.json came back — nothing was searched)" >&2
+  echo "count=$n store=${WU_DOMAIN:--} theme=$WU_NID files=$files engine=$WU_ENGINE"
+}
+
+GQL_WHERE_USED='query FeWhereUsedFiles($id: ID!, $after: String) {
+    shop { myshopifyDomain }
+    theme(id: $id) {
+      id
+      files(filenames: ["templates/*.json", "sections/*.json"], first: 250, after: $after) {
+        nodes { filename body { ... on OnlineStoreThemeFileBodyText { content } } }
+        pageInfo { hasNextPage endCursor }
+        userErrors { filename code }
+      }
+    }
+  }'
+
+gql_where_used() {
+  wu_resolve_theme gql_themes_lines || return 1
+  local gid after="" vars ue next pages=0 fn body
+  gid="gid://shopify/OnlineStoreTheme/$WU_NID"
+  WU_DIR="$(mktemp -d)"; CLEAN+=("$WU_DIR"); WU_ENGINE=gql
+  while :; do
+    vars="$(jq -n --arg id "$gid" --arg a "$after" '{id: $id} + (if $a == "" then {} else {after: $a} end)')"
+    gql "$GQL_WHERE_USED" "$vars" || return 1
+    [ "$(printf '%s' "$RESP" | jq -r '.data.theme | type' 2>/dev/null)" = object ] \
+      || { echo "error=theme_not_found theme=$gid" >&2; exit 5; }
+    WU_DOMAIN="$(printf '%s' "$RESP" | jq -r '.data.shop.myshopifyDomain // empty')"
+    ue="$(printf '%s' "$RESP" | jq -c '.data.theme.files.userErrors // []')"
+    [ "$ue" = "[]" ] || { echo "error=file_user_errors theme=$gid $(printf '%s' "$ue" | head -c 400)" >&2; exit 5; }
+    # filename and body NUL-separated in one jq pass; a filename that is not a flat theme path is skipped
+    while IFS= read -r -d '' fn && IFS= read -r -d '' body; do
+      case "$fn" in /*|*..*|*[[:cntrl:]]*) continue ;; templates/*.json|sections/*.json) ;; *) continue ;; esac
+      mkdir -p "$WU_DIR/$(dirname "$fn")"; printf '%s' "$body" > "$WU_DIR/$fn"
+    done < <(printf '%s' "$RESP" | jq -j '.data.theme.files.nodes[] | select(.body.content? | type == "string")
+      | .filename, "\u0000", .body.content, "\u0000"')
+    next="$(printf '%s' "$RESP" | jq -r '.data.theme.files.pageInfo | if .hasNextPage then .endCursor // "" else "" end')"
+    pages=$((pages + 1))
+    [ -n "$next" ] && [ "$pages" -lt 100 ] || break
+    after="$next"
+  done
+  wu_scan
+}
+
+cli_where_used() {
+  local err
+  wu_resolve_theme cli_themes_lines
+  WU_DOMAIN="$DOMAIN"; WU_ENGINE=themecli
+  WU_DIR="$(mktemp -d)"; err="$(mktemp)"; CLEAN+=("$WU_DIR" "$err")
+  shopify theme pull --store "$DOMAIN" --theme "$WU_NID" --path "$WU_DIR" \
+      --only 'templates/*.json' --only 'templates/**/*.json' --only 'sections/*.json' \
+      --nodelete --no-color >/dev/null 2>"$err" \
+    || { echo "error=cli_pull_failed theme=$WU_NID store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2; cli_auth_hint "$err"; tail -5 "$err" >&2; exit 5; }
+  wu_scan
+}
+
+# --stores: one run of this script per store, the hit lines passed through, one total at the end
+wu_stores() {
+  local cand s seen=" " n=0 skipped=0 total=0 rc searched="" out err line c
+  out="$(mktemp)"; err="$(mktemp)"; CLEAN+=("$out" "$err")
+  local args=(--engine "$ENGINE")
+  [ -n "$THEME" ]    && args+=(--theme "$THEME")
+  [ -n "$ENV_ARG" ]  && args+=(--env "$ENV_ARG")
+  [ -n "$APIV_ARG" ] && args+=(--api-version "$APIV_ARG")
+  while IFS= read -r cand; do
+    cand="$(trim_ws "$cand")"
+    [ -n "$cand" ] || continue
+    s="$(store_handle "$cand")" \
+      || { echo "note=where_used_skipped store='$cand' (not a myshopify handle, domain or URL)" >&2; continue; }
+    s="$(store_domain "$s" | tr 'A-Z' 'a-z')"
+    case "$seen" in *" $s "*) continue ;; esac
+    seen="$seen$s "; n=$((n + 1)); searched="${searched:+$searched,}${s%.myshopify.com}"
+    rc=0
+    "$BASH" "$SCRIPT_DIR/theme-json.sh" where-used "$WU_TYPE" --store "$s" "${args[@]}" >"$out" 2>"$err" </dev/null || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$ENGINE" = auto ] && grep -qE '^error=http_40[13]( |$)' "$err"; then
+      rc=0; "$BASH" "$SCRIPT_DIR/theme-json.sh" where-used "$WU_TYPE" --store "$s" --engine themecli "${args[@]:2}" >"$out" 2>"$err" </dev/null || rc=$?
+    fi
+    grep -E '^note=' "$err" >&2 || true
+    if [ "$rc" -ne 0 ]; then
+      skipped=$((skipped + 1))
+      echo "note=where_used_skipped store=$s rc=$rc ($(grep -v '^[[:space:]]*$' "$err" | tail -1))" >&2
+      continue
+    fi
+    while IFS= read -r line; do
+      case "$line" in
+        count=*) c="${line%% *}"; total=$((total + ${c#count=})) ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done < "$out"
+  done < <(printf '%s\n' "$STORES" | tr ',' '\n')
+  echo "count=$total stores=$n searched=${searched:--}$([ "$skipped" -eq 0 ] || printf ' unreachable=%s' "$skipped")"
+}
+
 # ------------------------------------------------------------------ dispatch --
 # run_op <gql_fn> <cli_fn>: engine dispatch with auto-fallback (gql fn returns 1 = fall back).
 run_op() {
@@ -1127,5 +1265,12 @@ case "$CMD" in
     [ -n "$THEME" ] || { echo "error=usage (locate needs a theme id: theme-json.sh locate <id> [--stores a,b,c])" >&2; exit 2; }
     gid_of "$THEME" >/dev/null
     locate_theme
+    ;;
+  where-used)
+    case "$WU_TYPE" in
+      ''|*[[:space:][:cntrl:]]*) echo "error=usage (where-used needs a section type: theme-json.sh where-used <section-type> [--theme <id>] [--stores a,b])" >&2; exit 2 ;;
+    esac
+    [ -z "$THEME" ] || gid_of "$THEME" >/dev/null
+    if [ -n "$STORES" ]; then wu_stores; else run_op gql_where_used cli_where_used; fi
     ;;
 esac

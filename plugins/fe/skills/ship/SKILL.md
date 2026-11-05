@@ -171,7 +171,7 @@ project root), and the probe rules — **strictly read-only**: GraphQL queries o
 mutations) via `<fe root>/scripts/shopify-admin-gql.sh`, targeted, not a full
 catalog scan, and `theme-json.sh` **`get` only, never `set`** — it probes, it never mutates
 store or theme state (that right belongs to the post-✋ phases, under snapshot→restore);
-anything big goes through `--out` into the workspace `tmp/` + `jq`; never `Read` `.env` or
+anything big goes through `--out` into the workspace `tmp/` + `jq` (`--strip-comments` with it: the raw banner does not parse); never `Read` `.env` or
 `shopify.theme.toml` — the bundled runners consume secrets without exposing them, and an
 auth failure is a result (mark the row **unverified**), never a reason to hunt for
 credentials; no/partial admin access → probe what it still can (theme code,

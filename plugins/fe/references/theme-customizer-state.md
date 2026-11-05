@@ -17,9 +17,19 @@ including the live one (reading live is safe). Don't guess what's configured on 
 ```bash
 <fe root>/scripts/theme-json.sh themes                       # id / name / role
 <fe root>/scripts/theme-json.sh locate <id>                  # which store holds theme <id>
+<fe root>/scripts/theme-json.sh where-used <section-type>     # which templates/groups hold it (live theme)
 <fe root>/scripts/theme-json.sh get --theme <id> --file templates/product.json \
   --strip-comments --out .claude/tasks/<work-id>/tmp/product.json          # then pull values with jq
 ```
+
+Two `--out` forms, two jobs: **`--out <path> --strip-comments`** is the one you read with `jq`
+(Shopify's `/*…*/` banner is gone); plain **`--out <path>`** is the raw, byte-exact snapshot for the
+restore step and does not parse in `jq`.
+
+`where-used <section-type>` answers "where is this section used" from the store, never from the
+repo's (stale) `templates/*.json`: it scans `templates/**/*.json` and `sections/*.json` of `--theme
+<id>`, else the live theme, and prints `store=… theme=… file=… section=<instance id>` per hit and a
+final `count=` line (0 hits is still exit 0). `--stores a,b` asks several stores; `--store` one.
 
 Inspection reads go through `--out` (the task workspace `tmp/`, mktemp when none) — a
 `settings_data.json` is 30–150 KB of context burn inline, and `get` without `--out` suppresses any
@@ -45,6 +55,7 @@ theme-json.sh themes [--role main|development|unpublished|live|demo]
 theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--out <file>] [--strip-comments]
 theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
 theme-json.sh locate <id|gid> [--stores <a,b,c>]
+theme-json.sh where-used <section-type> [--theme <id|gid>] [--stores <a,b,c>]
 theme-json.sh --help   # the same block, from the script itself
 # common: --store <domain> · --engine auto|store|token|themecli · --env <path> · --api-version <v>
 ```

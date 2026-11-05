@@ -355,11 +355,12 @@ push, a reap that printed `created_theme_deleted=failed`) — not deleted: a dea
 published theme instead. A body under ~300 characters, or that phrase → treat it as not
 deployed and re-push (`refresh --theme <id>`).
 
-### Anything else — `unknown arg` · `error=usage` · `error=unknown_command` · `error=invalid_theme_id` · `code push succeeded but could not parse theme id`
+### Anything else — `unknown arg` · `error=usage` · `error=unknown_command` · `error=invalid_theme_id` · `error=theme_id_conflict` · `code push succeeded but could not parse theme id`
 
 — the script also refuses uncoded, self-explaining states: a usage/argument
 error (`unknown arg: <flag>`, `error=unknown_command cmd='<x>'` for a subcommand that is not
-`info|create|refresh|pin`, `refresh requires --theme <id>`, `create requires --name`) — each
+`info|create|refresh|pin`, `refresh requires --theme <id>` (a bare numeric `refresh <id>` is the same call; it and a different
+`--theme` → `error=theme_id_conflict`), `create requires --name`) — each
 names `--help`, which prints the call shape from the script itself, as does
 `shopify-admin-gql.sh`'s `error=unknown_arg` — `error=invalid_theme_id`
 (`--theme` takes a numeric id),

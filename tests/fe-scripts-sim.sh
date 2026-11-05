@@ -104,9 +104,16 @@ case "${FAKE_RUNNER_MODE:-ok}" in
   # exit 0 with NO output — parses fine, yields no value
   empty)   exit 0 ;;
 esac
-Q=""; ST=""
-while [ $# -gt 0 ]; do case "$1" in --query) Q="$2"; shift 2 ;; --store) ST="$2"; shift 2 ;; *) shift ;; esac; done
+Q=""; ST=""; VF=""
+while [ $# -gt 0 ]; do case "$1" in --query) Q="$2"; shift 2 ;; --store) ST="$2"; shift 2 ;; --variables-file) VF="$2"; shift 2 ;; *) shift ;; esac; done
 role="${FAKE_ROLE:-DEVELOPMENT}"
+# where-used: FAKE_WU_PAGE1 / FAKE_WU_PAGE2 (files) answer the first page and the `after` page;
+# a --store equal to FAKE_WU_FAIL_STORE fails the way an unreachable store does
+if grep -q FeWhereUsedFiles "$Q"; then
+  [ -z "${FAKE_WU_FAIL_STORE:-}" ] || [ "$FAKE_WU_FAIL_STORE" != "$ST" ] || { echo "error=stub_store_unreachable store=$ST" >&2; exit 5; }
+  if grep -q '"after"' "$VF"; then cat "$FAKE_WU_PAGE2"; else cat "$FAKE_WU_PAGE1"; fi
+  exit 0
+fi
 if grep -q FeThemesList "$Q" && [ -n "${FAKE_THEMES_DIR:-}" ]; then
   [ -f "$FAKE_THEMES_DIR/$ST" ] || { echo "error=stub_store_unreachable store=$ST" >&2; exit 5; }
   cat "$FAKE_THEMES_DIR/$ST"
@@ -264,6 +271,8 @@ case "$*" in
   *"theme pull"*)
     [ "${TJ_PULL_FAIL:-}" = 401 ] && { printf '%s\n' '│  401 undefined  │' >&2; exit 1; }
     [ -n "${TJ_PULL_FAIL:-}" ] && { echo "Error: could not pull (503)" >&2; exit 1; }
+    # TJ_PULL_TREE (a dir): a glob pull (where-used) — the whole tree lands under --path
+    if [ -n "${TJ_PULL_TREE:-}" ] && [ -n "$path" ]; then cp -R "$TJ_PULL_TREE/." "$path/"; exit 0; fi
     n=1
     if [ -n "${TJ_PULL_COUNT:-}" ]; then
       n=$(( $(cat "$TJ_PULL_COUNT" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "$TJ_PULL_COUNT"
@@ -303,6 +312,9 @@ rc=0; outv="$(FAKE_BIG=1 "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 --file
 if [ "$rc" -eq 0 ] && printf '%s' "$outv" | grep -q 'note=large_file' \
    && ! printf '%s' "$outv" | grep -q 'xxxxxxxx'; then ok
 else bad T12-large-suppressed "rc=$rc out=$(printf '%s' "$outv" | head -c 120)"; fi
+# T12d: the note names the form jq can read — a raw --out keeps Shopify's /*…*/ banner, which jq refuses
+if printf '%s' "$outv" | grep -q 're-run with --out <path> --strip-comments (plain --out is the raw byte-exact snapshot'; then ok
+else bad T12d-large-hint-strip "out=$(printf '%s' "$outv" | head -c 300)"; fi
 
 # T12b: an improvised `get > snap.json` of a large file is FAIL-CLOSED — the captured
 # note is self-describing and not valid JSON, so a later `set --from` refuses it before
@@ -1438,6 +1450,72 @@ assert T64i-locate-needs-id 2 "$rc" "$E" "error=usage (locate needs a theme id"
 rc=0; tj_locate "$TJDIR/theme-json.sh" abc >"$O" 2>"$E" || rc=$?
 assert T64j-locate-bad-id 2 "$rc" "$E" "error=bad_theme_id"
 
+# T66: `where-used <section-type>` — which templates and section groups of a theme hold a section of
+# that type, read from the store: one hit line per instance, then the count line
+WU="$TMP/tjwu"; mkdir -p "$WU/tree/templates/customers" "$WU/tree/sections"
+printf '/* banner */\n{"sections":{"main":{"type":"main-product"},"cmp":{"type":"comparison","settings":{"x":"/* not a comment */"}}},"order":["main","cmp"]}' > "$WU/tree/templates/product.json"
+printf '{"sections":{"c1":{"type":"comparison"}},"order":["c1"]}' > "$WU/tree/templates/customers/account.json"
+printf '{"type":"header","name":"Header","sections":{"h":{"type":"header"}},"order":["h"]}' > "$WU/tree/sections/header-group.json"
+printf '{"sections":{"c9":{"type":"comparison"}},"order":["c9"]}' > "$WU/tree/templates/collection.json"
+wu_page() { # wu_page <hasNext> <files…> → a FeWhereUsedFiles envelope over $WU/tree
+  local nx="$1"; shift
+  local f nodes="[]"
+  for f in "$@"; do nodes="$(jq -c --arg f "$f" --rawfile b "$WU/tree/$f" '. + [{filename: $f, body: {content: $b}}]' <<< "$nodes")"; done
+  jq -nc --argjson n "$nodes" --argjson nx "$nx" \
+    '{data:{shop:{myshopifyDomain:"stub.myshopify.com"},theme:{id:"gid://shopify/OnlineStoreTheme/2",files:{nodes:$n,pageInfo:{hasNextPage:$nx,endCursor:(if $nx then "c1" else null end)},userErrors:[]}}}}'
+}
+wu_page true templates/product.json templates/customers/account.json sections/header-group.json > "$WU/p1.json"
+wu_page false templates/collection.json > "$WU/p2.json"
+rc=0; FAKE_WU_PAGE1="$WU/p1.json" FAKE_WU_PAGE2="$WU/p2.json" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" where-used comparison --theme 2 >"$O" 2>"$E" || rc=$?
+want='store=stub.myshopify.com theme=2 file=templates/collection.json section=c9
+store=stub.myshopify.com theme=2 file=templates/customers/account.json section=c1
+store=stub.myshopify.com theme=2 file=templates/product.json section=cmp
+count=3 store=stub.myshopify.com theme=2 files=4 engine=gql'
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = "$want" ]; then ok
+else bad T66-where-used-gql-paged "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# T66b: no --theme → the store's live theme (role MAIN; the stub lists Live = 1)
+rc=0; FAKE_WU_PAGE1="$WU/p2.json" "$BASH_BIN" "$TJDIR/theme-json.sh" where-used comparison >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=stub.myshopify.com theme=1 file=templates/collection.json section=c9$' "$O" \
+   && [ "$(tail -1 "$O")" = 'count=1 store=stub.myshopify.com theme=1 files=1 engine=gql' ]; then ok
+else bad T66b-where-used-live-default "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# T66c: zero hits is an answer (exit 0, count=0); a file that does not parse is named on stderr
+printf '{"sections": {' > "$WU/tree/templates/broken.json"
+wu_page false templates/broken.json templates/collection.json > "$WU/p3.json"
+rc=0; FAKE_WU_PAGE1="$WU/p3.json" "$BASH_BIN" "$TJDIR/theme-json.sh" where-used no-such-type --theme 2 >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = 'count=0 store=stub.myshopify.com theme=2 files=2 engine=gql' ] \
+   && grep -q '^note=where_used_unparsed file=templates/broken.json ' "$E"; then ok
+else bad T66c-where-used-zero-and-unparsed "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+rm -f "$WU/tree/templates/broken.json"
+# T66d: the section type is required
+rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" where-used --theme 2 >"$O" 2>"$E" || rc=$?
+assert T66d-where-used-needs-type 2 "$rc" "$E" "error=usage (where-used needs a section type"
+# T66e: themecli — one glob pull (templates/*.json, templates/**/*.json, sections/*.json) into a temp
+# dir, the live theme taken from the CLI listing
+L="$TMP/tj66e.log"; : > "$L"
+rc=0; TJ_CLI_LOG="$L" TJ_PULL_TREE="$WU/tree" SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
+  TJ_LIST_JSON='[{"id":7,"name":"Live","role":"live"},{"id":2,"name":"Dev","role":"development"}]' \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" where-used comparison --engine themecli --store test.myshopify.com >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(grep -c '^store=test.myshopify.com theme=7 file=templates/' "$O")" -eq 3 ] \
+   && [ "$(tail -1 "$O")" = 'count=3 store=test.myshopify.com theme=7 files=4 engine=themecli' ] \
+   && grep -q "argv=theme pull --store test.myshopify.com --theme 7 .*--only templates/\*.json --only templates/\*\*/\*.json --only sections/\*.json --nodelete" "$L"; then ok
+else bad T66e-where-used-themecli "rc=$rc out=$(tr '\n' ';' < "$O") log=$(grep argv "$L" | tr '\n' ';') err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# T66f: auto with no Admin credentials says so on stderr and runs on the theme CLI
+rc=0; FAKE_RUNNER_MODE=nocreds TJ_PULL_TREE="$WU/tree" SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" where-used comparison --theme 2 --store test.myshopify.com >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^note=gql engine unavailable (admin credentials not set up)' "$E" \
+   && [ "$(tail -1 "$O")" = 'count=3 store=test.myshopify.com theme=2 files=4 engine=themecli' ]; then ok
+else bad T66f-where-used-auto-fallback "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# T66g: --stores runs once per store, hit lines passed through, an unreachable store skipped and
+# counted, one total line last
+rc=0; FAKE_WU_PAGE1="$WU/p2.json" FAKE_WU_FAIL_STORE=store-x.myshopify.com \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" where-used comparison --theme 2 --stores store-a,store-x,store-a.myshopify.com >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(grep -c '^store=.* file=templates/collection.json section=c9$' "$O")" -eq 1 ] \
+   && ! grep -q '^count=1 store=' "$O" \
+   && [ "$(tail -1 "$O")" = 'count=1 stores=2 searched=store-a,store-x unreachable=1' ] \
+   && grep -q '^note=where_used_skipped store=store-x.myshopify.com rc=5 (.*stub_store_unreachable' "$E"; then ok
+else bad T66g-where-used-stores "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+
 unset FE_THEME_JSON_VERIFY_WAIT
 
 # T49: themecli `get` — a pull of exactly the named file into a private dir, whose body reaches
@@ -1598,15 +1676,15 @@ TJH="$TMP/tj-usage-header"
 awk '/^# Usage:/ { f = 1 } f { if ($0 == "#" || $0 !~ /^#( |$)/) exit; sub(/^# ?/, ""); print }' \
   "$TJ" > "$TJH"
 rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" --help >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 0 ] && [ "$(wc -l < "$TJH" | tr -d ' ')" -eq 7 ] && sed '$d' "$O" | diff -q - "$TJH" >/dev/null; then ok
+if [ "$rc" -eq 0 ] && [ "$(wc -l < "$TJH" | tr -d ' ')" -eq 8 ] && sed '$d' "$O" | diff -q - "$TJH" >/dev/null; then ok
 else bad T57-help-matches-header "rc=$rc diff=$(sed '$d' "$O" | diff - "$TJH" | head -c 300 | tr '\n' ';')"; fi
 # T57b: the pointer line that follows it names where the full contract lives
 if [ "$(tail -1 "$O")" = "Full contract: the header of $TJDIR/theme-json.sh" ]; then ok
 else bad T57b-help-pointer "tail=$(tail -1 "$O")"; fi
 # T57c: the reference's copy of the three command lines is the same text (the third copy)
 TJR="$ROOT/plugins/fe/references/theme-customizer-state.md"
-if [ "$(grep -c '^theme-json.sh \(themes\|get\|set\|locate\) ' "$TJR")" -eq 4 ] \
-   && grep '^theme-json.sh \(themes\|get\|set\|locate\) ' "$TJR" | diff -q - <(grep '^  theme-json.sh ' "$TJH" | sed 's/^  //') >/dev/null; then ok
+if [ "$(grep -c '^theme-json.sh \(themes\|get\|set\|locate\|where-used\) ' "$TJR")" -eq 5 ] \
+   && grep '^theme-json.sh \(themes\|get\|set\|locate\|where-used\) ' "$TJR" | diff -q - <(grep '^  theme-json.sh ' "$TJH" | sed 's/^  //') >/dev/null; then ok
 else bad T57c-reference-matches-usage "diff=$(grep '^theme-json.sh ' "$TJR" | diff - <(sed 's/^  //' "$TJH" | grep '^theme-json.sh ') | head -c 300 | tr '\n' ';')"; fi
 # T57d: the unknown_arg trailer lists every flag the parser accepts — a `--foo)` arm added above
 # without a trailer update would leave the refusal lying about the accepted set
@@ -1618,7 +1696,7 @@ if [ "$n" -ge 10 ] && [ -z "$missing" ]; then ok; else bad T57d-trailer-lists-fl
 
 # T58: the refusals name the way out — a guessed flag has to self-correct in one step
 rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" bogus >"$O" 2>"$E" || rc=$?
-assert T58-unknown-command-trailer 2 "$rc" "$E" "error=unknown_command cmd='bogus' (use themes|get|set|locate; --help prints usage)"
+assert T58-unknown-command-trailer 2 "$rc" "$E" "error=unknown_command cmd='bogus' (use themes|get|set|locate|where-used; --help prints usage)"
 rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" get --key sections >"$O" 2>"$E" || rc=$?
 assert T58b-unknown-arg-trailer 2 "$rc" "$E" "error=unknown_arg arg=--key (flags: --theme --file"
 if grep -q -- '--file' "$E" && grep -q -- '--help prints usage' "$E"; then ok
@@ -3051,6 +3129,30 @@ if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" \
    && [ "$(cpt_calls 'theme pull' "$L")" -eq 0 ] \
    && ! grep -q -- '--only' "$L"; then ok
 else bad P10-refresh-code-only "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+# P10b: a bare numeric id is `--theme <id>` for refresh (the skill routes "a bare theme id → refresh")
+rc=0; L="$TMP/cpt10b"; : > "$L"
+run_cpt "$L" NO=1 -- refresh 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && grep -q 'argv=theme push.*--theme 555' "$L"; then ok
+else bad P10b-refresh-bare-id "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+# P10c: the same id twice is one id; two different ids are refused before any push
+rc=0; L="$TMP/cpt10c"; : > "$L"
+run_cpt "$L" NO=1 -- refresh 555 --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O"; then ok
+else bad P10c-refresh-bare-id-same "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/cpt10d"; : > "$L"
+run_cpt "$L" NO=1 -- refresh 555 --theme 556 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=theme_id_conflict positional=555 theme=556 ' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P10d-refresh-id-conflict "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(tr '\n' ';' < "$L")"; fi
+# P10e: a non-numeric positional, and a bare id on another mode, stay unknown args
+rc=0; L="$TMP/cpt10e"; : > "$L"
+run_cpt "$L" NO=1 -- refresh 555x --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=unknown arg: 555x ' "$O"; then ok
+else bad P10e-refresh-non-numeric "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/cpt10f"; : > "$L"
+run_cpt "$L" NO=1 -- pin 555 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=unknown arg: 555 ' "$O"; then ok
+else bad P10f-pin-bare-id-refused "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # P13 (pin): `--reuse` with NO name match creates a new unpublished theme (the ambiguity count and
 # the id filter must not abort the run on the empty set under `set -euo pipefail`)
@@ -4956,7 +5058,8 @@ else bad P63b2-toml-store-other-spelling "rc=$rc out=$(head -c 240 "$O" | tr '\n
 # the dev theme lives
 rc=0; L="$TMP/cpt63c"; : > "$L"
 run_cpt "$L" SHOPIFY_STORE=acme-uk SHOPIFY_CLI_THEME_TOKEN=shptka_uk FAKE_LIST="$UK_LIST" -- info || rc=$?
-if [ "$rc" -eq 0 ] && grep -q '^store=acme-uk$' "$O" && grep -q '^note=dev_theme_other_store toml_store=acme-dev ' "$O"; then ok
+if [ "$rc" -eq 0 ] && grep -q '^store=acme-uk$' "$O" && grep -q '^note=dev_theme_other_store toml_store=acme-dev ' "$O" \
+   && grep -q -- 'create --name "<name>" --duplicate-of <a theme on acme-uk> --store acme-uk' "$O"; then ok
 else bad P63c-shopify-store-env "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
 rc=0; L="$TMP/cpt63c2"; : > "$L"
 run_cpt "$L" SHOPIFY_STORE=acme-other SHOPIFY_CLI_THEME_TOKEN=shptka_uk FAKE_LIST="$UK_LIST" -- info --store acme-uk || rc=$?

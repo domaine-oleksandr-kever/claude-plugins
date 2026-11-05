@@ -54,7 +54,7 @@
 #   create-preview-theme.sh create --name "<NAME>" --duplicate-of <theme-id|name> [--brand <b>]
 #                                  [--no-build] [--build-script <name>] [--ignore-extra "<glob>"]
 #                                  [--pin-toml [--env <name>]]
-#   create-preview-theme.sh refresh --theme <ID> [--no-build] [--build-script <name>] [--brand <b>]
+#   create-preview-theme.sh refresh --theme <ID> | <ID> [--no-build] [--build-script <name>] [--brand <b>]
 #                                   [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #                                   [--allow-unverified] [--allow-dev-theme]
 #   create-preview-theme.sh pin --theme <ID> [--env <name>]
@@ -95,6 +95,7 @@
 #       With that dir present and no --brand, a build is refused (`error=brand_required known=<dir,…>`,
 #       the build would silently pick its default brand); --no-build needs no brand.
 #   refresh --theme <ID> [--no-build] [--build-script <name>] [--brand <b>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
+#       (one bare numeric <ID> in place of `--theme <ID>` is the same call; both, different → error=theme_id_conflict)
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
 #       → theme_id=… store=… env=… preview_url=… editor_url=… [pushed=<HEAD sha>] built=… [css=…] [restored=…] [warn=build_dirtied=<path,…>] [warn=build_skipped_no_package_json]
@@ -228,7 +229,7 @@ USAGE='Usage:
   create-preview-theme.sh create --name "<NAME>" --duplicate-of <theme-id|name> [--brand <b>]
                                  [--no-build] [--build-script <name>] [--ignore-extra "<glob>"]
                                  [--pin-toml [--env <name>]]
-  create-preview-theme.sh refresh --theme <ID> [--no-build] [--build-script <name>] [--brand <b>]
+  create-preview-theme.sh refresh --theme <ID> | <ID> [--no-build] [--build-script <name>] [--brand <b>]
                                   [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
                                   [--allow-unverified] [--allow-dev-theme]
   create-preview-theme.sh pin --theme <ID> [--env <name>]
@@ -1136,7 +1137,7 @@ case "$MODE" in
     printf 'env=%s\n' "$TOML_ENV"
     printf 'dev_theme_id=%s\n' "$DEV_THEME_ID"
     printf 'dev_theme_name=%s\n' "$(theme_name_by_id "$DEV_THEME_ID")"
-    [ "$FOREIGN" -eq 0 ] || printf 'note=dev_theme_other_store toml_store=%s — the dev theme (the settings source) lives on the toml store, so create is refused on %s; refresh works\n' "$TOML_STORE" "$STORE"
+    [ "$FOREIGN" -eq 0 ] || printf 'note=dev_theme_other_store toml_store=%s — the dev theme (the settings source) lives on the toml store, so plain create is refused on %s; refresh an existing theme there (`refresh --theme <id> --store %s`), or make a NEW preview with `create --name "<name>" --duplicate-of <a theme on %s> --store %s`\n' "$TOML_STORE" "$STORE" "$STORE" "$STORE" "$STORE"
     ;;
 
   pin)
@@ -1303,10 +1304,14 @@ case "$MODE" in
     ;;
 
   refresh)
-    TARGET=""
+    TARGET=""; POS_ID=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --theme) need_val $# "$1"; TARGET="$2"; shift 2 ;;
+        # one bare numeric id is `--theme <id>` (refresh only — the skill routes a bare id here)
+        [0-9]*) case "$1" in *[!0-9]*) fail "unknown arg: $1 (--help prints usage)" ;; esac
+                [ -z "$POS_ID" ] || fail "unknown arg: $1 (refresh takes one theme id; --help prints usage)"
+                POS_ID="$1"; shift ;;
         --brand) need_val $# "$1"; BRAND_ARG="$2"; shift 2 ;;
         --no-build) NO_BUILD=1; shift ;;
         --build-script) need_val $# "$1"; BUILD_SCRIPT="$2"; BUILD_SCRIPT_SET=1; shift 2 ;;
@@ -1319,6 +1324,11 @@ case "$MODE" in
         *) fail "unknown arg: $1 (--help prints usage)" ;;
       esac
     done
+    if [ -n "$POS_ID" ]; then
+      [ -z "$TARGET" ] || [ "$TARGET" = "$POS_ID" ] \
+        || fail "theme_id_conflict positional=$POS_ID theme=$TARGET — refresh got two different theme ids; pass one (\`refresh <id>\` or \`refresh --theme <id>\`)"
+      TARGET="$POS_ID"
+    fi
     [ -n "$TARGET" ] || fail "refresh requires --theme <existing theme id>"
     # same guard as create: --env without --pin-toml would be a silent no-op
     [ "$PIN" -eq 1 ] || [ -z "$PIN_ENV" ] || fail "--env requires --pin-toml"
