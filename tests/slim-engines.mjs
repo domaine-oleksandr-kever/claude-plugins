@@ -305,6 +305,24 @@ function ecRows() {
     eq('EC-diff-under-budget', [compress({ data: d }, O).decision, compress({ data: d }, O).text === d], ['passthrough', true]);
   }
   {
+    const head = ['diff --git a/x b/x', 'index 1..2 100644', '--- a/x', '+++ b/x', '@@ -1,960 +1,960 @@'];
+    const ctx = (t, n) => Array.from({ length: n }, (_, i) => `   {%- assign ctx_${t}_${i} = settings.block_${i} | default: 'some value here' -%}`);
+    const pairs = (t, n) => Array.from({ length: n }, (_, i) => [`-  {%- render 'card-${t}', size: ${i}, style: 'old' -%}`, `+  {%- render 'card-${t}', size: ${i}, style: 'new' -%}`]).flat();
+    const num = (m, re) => Number(m.match(re)[1].replace(/,/g, ''));
+    for (const [name, d] of [['short-pairs', `${[...head, ...ctx('a', 30), ...pairs('x', 900), ...ctx('b', 30)].join('\n')}\n`],
+      ['swallowed-run', [...head, ...ctx('a', 30), ...pairs('x', 450), ...ctx('m', 40), ...pairs('y', 450), ...ctx('b', 30)].join('\n')]]) {
+      const r = compress({ data: d }, O);
+      const total = d.split('\n').length;
+      const rl = r.text.split('\n');
+      const marks = rl.filter((l) => / lines hidden \(/.test(l));
+      const vis = rl.filter((l) => !l.startsWith('[slim: '));
+      const hidden = marks.reduce((n, m) => n + num(m, /^\[slim: ([\d,]+) of/), 0);
+      const hiddenB = marks.reduce((n, m) => n + num(m, /\(([\d,]+) B\)\]$/), 0);
+      eq(`EC-diff-fallback-counts-${name}`, [r.decision, marks.length, marks.every((m) => num(m, / of ([\d,]+) lines/) === total), hidden + vis.length,
+        hiddenB + bytes(vis.join('\n')) + 1, r.window.lines_total, r.window.lines_hidden, r.window.bytes_hidden], ['compressed', 3, true, total, bytes(d) + 1, total, hidden, hiddenB]);
+    }
+  }
+  {
     const env = JSON.stringify({ isError: true, content: [{ type: 'text', text: JQL }] });
     const r = compress({ data: env }, O);
     eq('EC-error-shape', [r.decision, r.reason], ['passthrough', 'error-shape']);

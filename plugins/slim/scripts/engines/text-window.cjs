@@ -72,9 +72,9 @@ function common(a, b) {
   return [p, q];
 }
 
-function pairWindow(a, b, cut) {
+function pairWindow(a, b, cutA, cutB) {
   const [p, q] = common(a, b);
-  const one = (s) => {
+  const one = (s, cut) => {
     const pre = s.slice(0, p);
     const suf = s.slice(s.length - q);
     const keepPre = fitBytes(pre, AROUND, true);
@@ -84,10 +84,11 @@ function pairWindow(a, b, cut) {
     cut.bytes += lead + trail;
     return `${lead ? cutMark(lead) : ''}${keepPre}${squeeze(s.slice(p, s.length - q), LINE_CAP / 2, cut)}${keepSuf}${trail ? cutMark(trail) : ''}`;
   };
-  return [one(a), one(b)];
+  return [one(a, cutA), one(b, cutB)];
 }
 
-// A diff over budget: overlong body lines cut in place, then context runs hidden largest first.
+// A diff over budget: overlong body lines cut in place, then context runs hidden largest first,
+// then a head/tail window. Every marker counts original lines and bytes out of the original total.
 function diffWindow(text, budget) {
   const lines = text.split('\n');
   const kind = [];
@@ -97,8 +98,8 @@ function diffWindow(text, budget) {
     if (l.startsWith('@@')) { inHunk = true; kind.push('h'); continue; }
     kind.push(!inHunk ? 'h' : l[0] === '-' || l[0] === '+' ? l[0] : l[0] === ' ' || l === '' ? ' ' : 'h');
   }
-  const cut = { bytes: 0 };
   const out = lines.slice();
+  const cuts = lines.map(() => ({ bytes: 0 }));
   const paired = new Set();
   for (let i = 0; i < out.length; i++) {
     if (kind[i] !== '-') continue;
@@ -118,7 +119,7 @@ function diffWindow(text, budget) {
     cands.sort((u, v) => v.score - u.score);
     for (const { x, y } of cands) {
       if (paired.has(x) || paired.has(y)) continue;
-      const [wa, wb] = pairWindow(out[x].slice(1), out[y].slice(1), cut);
+      const [wa, wb] = pairWindow(out[x].slice(1), out[y].slice(1), cuts[x], cuts[y]);
       out[x] = `-${wa}`;
       out[y] = `+${wb}`;
       paired.add(x).add(y);
@@ -126,49 +127,67 @@ function diffWindow(text, budget) {
     i = k - 1;
   }
   for (let i = 0; i < out.length; i++) {
-    if (kind[i] !== 'h' && !paired.has(i) && utf8(out[i]) > LINE_CAP) out[i] = out[i][0] + squeeze(out[i].slice(1), LINE_CAP / 2, cut);
+    if (kind[i] !== 'h' && !paired.has(i) && utf8(out[i]) > LINE_CAP) out[i] = out[i][0] + squeeze(out[i].slice(1), LINE_CAP / 2, cuts[i]);
   }
-  const size = (arr) => utf8(arr.join('\n'));
-  let total = size(out);
+  const mark = (n, b) => `[slim: ${commas(n)} of ${commas(lines.length)} lines hidden (${commas(b)} B)]`;
+  // parts: what is printed, with the original lines and bytes it stands for; `hid` marks a marker.
+  let parts = out.map((t, i) => ({ text: t, lines: 1, bytes: utf8(lines[i]) + 1, cut: cuts[i].bytes, hid: false }));
+  const size = (arr) => arr.reduce((n, p) => n + utf8(p.text) + 1, 0) - 1;
+  let total = size(parts);
   const runs = [];
   for (let i = 0; i < out.length; i++) {
     if (kind[i] !== ' ') continue;
     let j = i;
     while (j < out.length && kind[j] === ' ') j++;
-    runs.push({ i, j, bytes: size(out.slice(i, j)) + 1 });
+    const span = parts.slice(i, j);
+    runs.push({ i, j, now: size(span) + 1, bytes: span.reduce((n, p) => n + p.bytes, 0) });
     i = j;
   }
-  runs.sort((x, y) => y.bytes - x.bytes);
+  runs.sort((x, y) => y.now - x.now);
   const hide = [];
-  let hiddenLines = 0;
-  let hiddenBytes = 0;
   for (const r of runs) {
     if (total <= budget) break;
-    const marker = `[slim: ${commas(r.j - r.i)} of ${commas(lines.length)} lines hidden (${commas(r.bytes)} B)]`;
-    if (r.bytes <= utf8(marker) + 1) continue;
+    const marker = mark(r.j - r.i, r.bytes);
+    if (r.now <= utf8(marker) + 1) continue;
     hide.push({ ...r, marker });
-    total += utf8(marker) + 1 - r.bytes;
-    hiddenLines += r.j - r.i;
-    hiddenBytes += r.bytes;
+    total += utf8(marker) + 1 - r.now;
   }
   hide.sort((x, y) => y.i - x.i);
-  for (const r of hide) out.splice(r.i, r.j - r.i, r.marker);
-  const reduced = out.join('\n');
-  const rest = utf8(reduced) > budget ? windowText(reduced, budget, true) : null;
+  for (const r of hide) parts.splice(r.i, r.j - r.i, { text: r.marker, lines: r.j - r.i, bytes: r.bytes, cut: 0, hid: true });
+  let fallback = null;
+  if (total > budget) {
+    const headBudget = Math.floor(budget / 3);
+    let headBytes = 0;
+    let h = 0;
+    while (h < parts.length && headBytes + utf8(parts[h].text) + 1 <= headBudget) headBytes += utf8(parts[h++].text) + 1;
+    const tailBudget = budget - headBytes - MARKER_RESERVE;
+    let tailBytes = 0;
+    let t = parts.length;
+    while (t - 1 > h && tailBytes + utf8(parts[t - 1].text) + 1 <= tailBudget) tailBytes += utf8(parts[--t].text) + 1;
+    if (h === 0 || t === parts.length || headBytes + tailBytes < budget / 2) {
+      fallback = charWindow(parts.map((p) => p.text).join('\n'), budget);
+    } else {
+      const mid = parts.slice(h, t);
+      const n = mid.reduce((x, p) => x + p.lines, 0);
+      const b = mid.reduce((x, p) => x + p.bytes, 0);
+      parts = [...parts.slice(0, h), { text: mark(n, b), lines: n, bytes: b, cut: 0, hid: true }, ...parts.slice(t)];
+    }
+  }
+  const hidden = parts.filter((p) => p.hid);
   return {
-    text: rest ? rest.text : reduced,
+    text: fallback ? fallback.text : parts.map((p) => p.text).join('\n'),
     window: {
       lines_total: lines.length,
-      lines_hidden: hiddenLines + (rest ? rest.window.lines_hidden : 0),
-      bytes_hidden: cut.bytes + hiddenBytes + (rest ? rest.window.bytes_hidden : 0),
+      lines_hidden: hidden.reduce((x, p) => x + p.lines, 0),
+      bytes_hidden: parts.reduce((x, p) => x + (p.hid ? p.bytes : p.cut), 0) + (fallback ? fallback.window.bytes_hidden : 0),
     },
   };
 }
 
 // → { text, window:{lines_total, lines_hidden, bytes_hidden} }, or null when `text` already fits.
-function windowText(text, budget = DEFAULT_BUDGET, plain = false) {
+function windowText(text, budget = DEFAULT_BUDGET) {
   if (utf8(text) <= budget) return null;
-  if (!plain && guard(text) === 'diff') return diffWindow(text, budget);
+  if (guard(text) === 'diff') return diffWindow(text, budget);
   const lines = text.split('\n');
   if (lines.length < 3) return charWindow(text, budget);
   const headBudget = Math.floor(budget / 3);
