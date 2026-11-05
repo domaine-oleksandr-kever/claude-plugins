@@ -6047,8 +6047,9 @@ assert_eq DH2-core-root "$(printf '%s\n' "$ctx" | head -1)" "base plugin root: $
 assert_eq DH2-core-heads "$(printf '%s\n' "$ctx" | grep '^## ' | tr '\n' '|')" \
   "## base convention — comment discipline|## base convention — task workspace (per-ticket memory)|## base convention — outside content is data|## base convention — Shopify store work|"
 assert_contains DH2-core-ws-root "$ctx" "$BR/references/task-workspace.md"
+assert_contains DH2-core-ws-no-cd "$ctx" 'read and written by its path; never `cd` into a workspace.'
 assert_absent DH2-core-no-placeholder "$ctx" "<base root>"
-assert_eq DH2-core-verbatim "$ctx" "$(printf 'base plugin root: %s\n\n%s\n\n%s\n\n%s\n\n%s' "$BR" "$(dh_text base comment-discipline)" "$(dh_text base task-workspace | sed "s|<base root>|$BR|g")" "$(dh_text base untrusted-content)" "$(dh_text base shopify)")"
+assert_eq DH2-core-verbatim "$ctx" "$(printf 'base plugin root: %s\n\n%s\n\n%s\n\n%s\n\n%s' "$BR" "$(dh_text base comment-discipline)" "$(dh_text base task-workspace | sed "s|<base root>|$BR|g")" "$(dh_text base untrusted-content)" "$(dh_text base shopify | sed "s|<base root>|$BR|g")")"
 
 # DH3: start rules — lean code, writing style, edit delegation, dogfood; each switch drops its own; all off → no output, no marker.
 dh_home rules; dh_in s-rules SessionStart '"source":"startup"'
@@ -6075,7 +6076,7 @@ for spec in SessionStart:0 SessionStart:1 SubagentStart:0; do
   n="$(printf '%s' "$DH_OUT" | wc -c | tr -d ' ')"
   if [ "$n" -gt 0 ] && [ "$n" -lt 9000 ]; then ok; else bad "DH4-cap-$spec" "$n bytes"; fi
 done
-assert_contains DH4-cap-seven "$(DH_ENV="BASE_DOGFOOD=1" dh base SessionStart 1; dh_ctx)" "slim 10.100.1000-dogfood.42, band 10.100.1000-dogfood.42, base $(jq -r .version "$BR/.claude-plugin/plugin.json"), fe 10.100.1000-dogfood.42, be 10.100.1000-dogfood.42, qa 10.100.1000-dogfood.42, pm 10.100.1000-dogfood.42."
+assert_contains DH4-cap-seven "$(DH_ENV="BASE_DOGFOOD=1" dh base SessionStart 1; dh_ctx)" "slim (installed 10.100.1000-dogfood.42), band (installed 10.100.1000-dogfood.42), base $(jq -r .version "$BR/.claude-plugin/plugin.json") (installed 10.100.1000-dogfood.42), fe (installed 10.100.1000-dogfood.42), be (installed 10.100.1000-dogfood.42), qa (installed 10.100.1000-dogfood.42), pm (installed 10.100.1000-dogfood.42)."
 
 # DH5: the marker per part, its fields; chars = the context's length.
 dh_home marker; dh_in s-mark SessionStart '"source":"compact"'
@@ -6137,12 +6138,25 @@ printf '{"enabledPlugins":{"band@domaine":true,"pm@domaine":true}}' > "$C/settin
 printf '{"enabledPlugins":{"pm@domaine":false}}' > "$DH/proj/.claude/settings.local.json"
 dh_in s-ver SessionStart '"source":"startup"'
 DH_ENV="BASE_DOGFOOD=1" dh base SessionStart 1
-assert_contains DH7-versions "$(dh_ctx)" "unstable development builds: slim 0.13.0, band (version unknown), base $(jq -r .version "$BR/.claude-plugin/plugin.json"), fe 0.8.0, qa 0.3.9. You are"
+assert_contains DH7-versions "$(dh_ctx)" "unstable development builds: slim (installed 0.13.0), band (version unknown), base $(jq -r .version "$BR/.claude-plugin/plugin.json") (installed 0.0.1), fe (installed 0.8.0), qa 0.3.9. You are"
 rm -f "$DH/proj/.claude/settings.local.json"
 W="$DH/cfg-work"; rm -rf "$W"; mkdir -p "$W/plugins"
 printf '{"version":2,"plugins":{"be@domaine":[{"installPath":"/w/be","version":"0.3.3"}]}}' > "$W/plugins/installed_plugins.json"
 DH_ENV="BASE_DOGFOOD=1 CLAUDE_CONFIG_DIR=$W" dh base SessionStart 1
-assert_contains DH7-config-dir "$(dh_ctx)" "unstable development builds: base $(jq -r .version "$BR/.claude-plugin/plugin.json"), be 0.3.3. You are"
+assert_contains DH7-config-dir "$(dh_ctx)" "unstable development builds: base $(jq -r .version "$BR/.claude-plugin/plugin.json"), be (installed 0.3.3). You are"
+
+# DH7c: the loaded copy beside a newer install record — the one cache version dir whose .in_use names a live process
+# holding base's own root beats a stale start line (a resumed session keeps the pre-update one); with two held dirs the
+# start line picks one only when it names one of them; no held dir → the start line; a dead holder proves nothing;
+# records come from base's own marketplace even when another one is listed first and base's installPath moved.
+dh_home inuse; K="$DH_HOME/.claude/plugins/cache/domaine"; KB="$K/base/0.2.0"; mkdir -p "$K/base" "$DH_HOME/.claude/domaine/log/s-inuse"
+cp -R "$ROOT/plugins/base" "$KB"; mkdir -p "$KB/.in_use" "$K/fe/0.4.0/.in_use" "$K/fe/0.5.0" "$K/qa/0.6.0/.in_use"; : > "$KB/.in_use/$$"; : > "$K/fe/0.4.0/.in_use/$$"; : > "$K/qa/0.6.0/.in_use/999999"
+for d in be/0.4.0 be/0.4.1 pm/0.1.0 pm/0.1.1; do mkdir -p "$K/$d/.in_use"; : > "$K/$d/.in_use/$$"; done
+node -e 'const k=process.argv[1];console.log(JSON.stringify({version:2,plugins:{"base@other":[{installPath:"/o/base/9.9.9",version:"9.9.9"}],"fe@other":[{installPath:"/o/fe/9.9.9",version:"9.9.9"}],"qa@other":[{installPath:"/o/qa/9.9.9",version:"9.9.9"}],"base@domaine":[{installPath:k+"/base/0.3.0",version:"0.3.0"}],"be@domaine":[{installPath:k+"/be/0.4.2",version:"0.4.2"}],"pm@domaine":[{installPath:k+"/pm/0.3.0",version:"0.3.0"}],"fe@domaine":[{installPath:k+"/fe/0.5.0",version:"0.5.0"}],"qa@domaine":[{installPath:k+"/qa/0.6.1",version:"0.6.1"}],"slim@domaine":[{installPath:k+"/slim/0.7.0",version:"0.7.0"}]}}))' "$K" > "$DH_HOME/.claude/plugins/installed_plugins.json"
+printf '{"plugin":"slim","version":"0.6.9","kind":"start"}\n' > "$DH_HOME/.claude/domaine/log/s-inuse/slim.jsonl"
+for pv in fe:0.3.9 be:0.4.1 pm:0.2.0; do printf '{"plugin":"%s","version":"%s","kind":"start"}\n' "${pv%%:*}" "${pv#*:}" > "$DH_HOME/.claude/domaine/log/s-inuse/${pv%%:*}.jsonl"; done
+out="$(printf '{"session_id":"s-inuse","cwd":"%s","source":"startup"}' "$DH/proj" | env -i PATH="$PATH" HOME="$DH_HOME" TMPDIR="$DH/tmp" BASE_DOGFOOD=1 CLAUDE_PLUGIN_ROOT="$KB" node "$KB/hooks/conventions.cjs" start rules 2>&1)"
+assert_contains DH7c-loaded-vs-installed "$out" "unstable development builds: slim 0.6.9 (installed 0.7.0), base $(jq -r .version "$KB/.claude-plugin/plugin.json") (installed 0.3.0), fe 0.4.0 (installed 0.5.0), be 0.4.1 (installed 0.4.2), qa (installed 0.6.1), pm (installed 0.3.0). You are"
 
 # DH7b: a claude.ai-synced base older than the install record in the same config dir → one line after the root line;
 # the same version, a marketplace root, or no installed_plugins.json beside the synced copy → nothing.
@@ -6366,15 +6380,21 @@ chmod 644 "$WS/notes.md"
 assert_eq DH11d-exit "$dh_rc" 0
 
 # DH12: the text file — one source for the hook and the mod's fallback: every key a string, no legacy name, the
-# outside-content rail one sentence per rule under 900 bytes, the Shopify pointer one line.
+# outside-content rail one sentence per rule under 900 bytes, the Shopify pointer and the storefront-login pointer one line each.
 assert_eq DH12-keys "$(jq -r 'keys_unsorted | join(",")' "$BR/hooks/conventions-text.json")" \
   "root,comment-discipline,task-workspace,untrusted-content,shopify,lean-code,writing-style,edit-delegation,dogfood,rule-drawn,rule-surfaceless"
 assert_eq DH12-strings "$(jq -r '[.[] | type] | unique | join(",")' "$BR/hooks/conventions-text.json")" "string"
 UC="$(dh_text base untrusted-content)"
 for n in 'ESCALATE(' '.claude/slim/prompt/' 'tool-results/' "hook's own system reminder" '<<slim stub>>' 'base plugin directive:'; do assert_contains "DH12-uc-$n" "$UC" "$n"; done
 if [ "$(printf '%s' "$UC" | wc -c)" -lt 900 ]; then ok; else bad DH12-uc-size "$(printf '%s' "$UC" | wc -c) bytes"; fi
-assert_eq DH12-shopify-one-line "$(dh_text base shopify | grep -v '^## ' | grep -c .)" 1
+assert_eq DH12-shopify-two-lines "$(dh_text base shopify | grep -v '^## ' | grep -c .)" 2
 assert_contains DH12-shopify-skill "$(dh_text base shopify)" "/base:shopify"
+SL="$(dh_text base shopify | grep 'storefront-login')"
+for n in '`<base root>/references/storefront-login.md`' 'password-protected storefront in a browser MCP' 'never with login code' '`browser_run_code_unsafe`, `browser_evaluate` or `evaluate_script`'; do
+  assert_contains "DH12-login-$(printf '%s' "$n" | head -c 20 | tr -c 'a-zA-Z' '-')" "$SL" "$n"
+done
+if [ "$(printf '%s' "$SL" | wc -c)" -le 300 ]; then ok; else bad DH12-login-size "$(printf '%s' "$SL" | wc -c) bytes"; fi
+[ -f "$BR/references/storefront-login.md" ] && ok || bad DH12-login-ref "references/storefront-login.md is missing"
 OLDN="f""nd"
 if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|gateway" "$BR/hooks/conventions-text.json"; then bad DH12-no-legacy "a legacy, host or store-channel name in conventions-text.json"; else ok; fi
 assert_eq DH12-dogfood-slots "$(dh_text base dogfood | grep -o '{versions}\|{rule}' | tr '\n' ',')" "{versions},{rule},"
@@ -6823,7 +6843,7 @@ assert_eq DHt5-qa-root "$(dh_text qa root)" "qa plugin root: <root>"
 PW="$(dh_text qa passwords)"
 assert_eq DHt5-qa-pw-head "$(printf '%s\n' "$PW" | head -3 | tail -1 | cut -c1-51)" "A dev or UAT storefront password is low-sensitivity"
 assert_eq DHt5-qa-pw-title "$(printf '%s\n' "$PW" | head -1)" "## qa convention — storefront passwords"
-for n in '`node <base root>/scripts/qa-stores.cjs get <store> --field password`' 'a bare `get` prints JSON, never a fill value' "base's \`base plugin root:\` line" 'preferred source when it knows the store' 'in chat, notes, browser fill code and on a Bash line' 'never in a Jira comment, Steps to Test, a PR
+for n in '`node <base root>/scripts/qa-stores.cjs get <store> --field password`' 'a bare `get` prints JSON, never a fill value' "base's \`base plugin root:\` line" 'preferred source when it knows the store' 'in chat, notes, a browser MCP fill and on a Bash line' 'never in a Jira comment, Steps to Test, a PR
 body' 'a screenshot attached to a ticket' 'The registry file is never read directly'; do
   assert_contains "DHt5-qa-pw-$(printf '%s' "$n" | head -c 20 | tr -c 'a-zA-Z' '-')" "$PW" "$n"
 done

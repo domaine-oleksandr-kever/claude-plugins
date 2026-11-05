@@ -11,10 +11,14 @@
    gate form posts to `/password`; a page can carry other password inputs). A page with several
    `/password` forms → the narrower `form:has(input[value=storefront_password]) input[name=password]`
    (not every theme's gate form carries that `form_type` field). Take its `ref` / `uid` from a
-   snapshot.
+   snapshot; no ref because the field is hidden behind an "Enter using password" button → click
+   that button, then snapshot again.
 4. **Fill** — Playwright MCP: `browser_type` (or `browser_fill_form`) on that ref; chrome-devtools
-   MCP: `fill` on that uid. Never through `browser_evaluate` / `evaluate_script` with the password
-   in a JS string: the host's auto-mode classifier blocks that as input exfiltration.
+   MCP: `fill` on that uid. Never write login code: no `browser_run_code_unsafe`,
+   `browser_evaluate` or `evaluate_script` that fills or submits the gate (a `.fill`, a `.value =`,
+   a form submit or a POST to `/password`), also not on the field handed to it as a ref or uid. The host's auto-mode classifier blocks the password in a
+   JS string as input exfiltration, a scripted fill waits 30 s on a hidden field, and base's MCP
+   guard refuses such a call once per session.
 5. **Submit** — Enter or a click on the form's submit button, then wait for the next page to reach
    `domcontentloaded` before any read.
 6. **Verify** — still on `/password`, or a `form[action*="/password"]` on the page → the password is

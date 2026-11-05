@@ -156,6 +156,8 @@ is a log; it doesn't go stale.
 - An existing `notes.md`, `progress.md` or team plugin file is appended to or edited in place
   (the Edit tool, `sed`), never overwritten with `cat >` or Write — earlier entries are lost.
   Reader files are the exception: a re-fetch overwrites them.
+- A workspace file is read and written by its path; never `cd` into a workspace — the shell's
+  working directory stays there, and every later repo command fails.
 - Scratch files created while working (test scripts, query drafts, dumps, screenshots) go in
   the workspace `tmp/` — never the project root.
 - **Never** store secrets (tokens, `.env` values, storefront passwords) or raw payloads (ADF, Figma node trees, full Notion/Confluence pages) —

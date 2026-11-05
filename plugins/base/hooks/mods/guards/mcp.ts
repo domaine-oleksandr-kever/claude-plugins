@@ -1,12 +1,14 @@
 // The MCP guards in one tool.call hook, server-agnostic. A subagent of base's reader or writer types calls MCP tools
 // only on a server serving its vendor's tools, and a Jira, Confluence or Notion write only when its type allows it (an
 // unknown type gets none). A server other than a plugin's that serves the same tools as one of base's own takes
-// precedence: base's tool is refused once per session, then allowed. Each deny writes one `guard` event.
+// precedence: base's tool is refused once per session, then allowed. Storefront login code in a browser MCP's code tool
+// on any server is refused once per session, then allowed (./login.ts). Each deny writes one `guard` event.
 import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent } from '../../../types'
 import { logDir, logLine, pushEvent, spareRoot } from '../events.ts'
 import type { Disk } from '../events.ts'
+import { LOGIN_TOOLS, isLoginCall, loginDenyText } from './login.ts'
 
 /** The write tools by tool name on any server; tests/base-refs-lint.sh reads both lists from this file. */
 export const JIRA_WRITES = [
@@ -39,6 +41,8 @@ const WRITER = 'base:jira-writer'
 const WRITER_TOOLS = new Set(['editJiraIssue', 'addCommentToJiraIssue'])
 const OWN = 'plugin_base_'
 const SOFT_CAP = 200
+/** The `mcpSoft` entry that marks this session's storefront-login refusal: no tool name has a space. */
+const LOGIN_KEY = 'storefront login'
 
 const soft = atom({ plugin: 'base', key: 'mcpSoft' } as const, { sid: '', tools: [] as string[] })
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
@@ -136,18 +140,22 @@ async function agentType($: $, id: string): Promise<string | null | undefined> {
   return failed ? undefined : null
 }
 
-/** The one refusal per session of base's own `full` while another server serves the same tools; null when none applies. */
-async function precedence($: $, full: string, name: { server: string; tool: string }, names: readonly string[]): Promise<string | null> {
-  const twin = twinServers(names, name.server.slice(OWN.length)).find(s => names.includes(`mcp__${s}__${name.tool}`))
-  if (!twin) return null
+/** True the first time this session asks for `key`; marks it, so the next ask answers false. */
+async function firstRefusal($: $, key: string): Promise<boolean> {
   const sid = String(await $.session.id())
   let fresh = false
   await update($, soft, s => {
     const tools = s.sid === sid ? s.tools : []
-    fresh = !tools.includes(full)
-    return fresh ? { sid, tools: [...tools, full].slice(-SOFT_CAP) } : s
+    fresh = !tools.includes(key)
+    return fresh ? { sid, tools: [...tools, key].slice(-SOFT_CAP) } : s
   })
-  if (!fresh) return null
+  return fresh
+}
+
+/** The one refusal per session of base's own `full` while another server serves the same tools; null when none applies. */
+async function precedence($: $, full: string, name: { server: string; tool: string }, names: readonly string[]): Promise<string | null> {
+  const twin = twinServers(names, name.server.slice(OWN.length)).find(s => names.includes(`mcp__${s}__${name.tool}`))
+  if (!twin || !(await firstRefusal($, full))) return null
   const other = `mcp__${twin}__${name.tool}`
   await logGuard($, `${name.tool}: ${twin} takes precedence`)
   return `${full}: ${other} serves the same tool and takes precedence — call ${other} instead; if that fails, call ${full} again (it is allowed after this one refusal)`
@@ -172,6 +180,10 @@ export function registerMcpGuards(on: On): void {
         await logGuard($, `${name.tool}: ${type} may not call ${name.server}`)
         return { deny: scope }
       }
+    }
+    if (LOGIN_TOOLS.test(name.tool) && isLoginCall(e as unknown as Record<string, unknown>) && (await firstRefusal($, LOGIN_KEY))) {
+      await logGuard($, `${name.tool}: storefront login code`)
+      return { deny: loginDenyText($.plugin.root) }
     }
     const list = name.server.startsWith(OWN) ? await names() : null
     const deny = list ? await precedence($, e.tool, name, list) : null

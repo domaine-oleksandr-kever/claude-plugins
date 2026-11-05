@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { NUDGE, TOOL, bashText, capEvidence, crashedIn, defectBody, deniedNotRun, designedRefusal, dogfoodAccounts, errorLine, failureLine, pluginScript, pluginScripts, priorErrors, scriptLast, seen, slugOf, startVersion, syncedRoot, versionsLine, versionsOf } from '../dogfood/text.ts'
+import { NUDGE, TOOL, bashText, cacheDirOf, marketplaceOf, capEvidence, crashedIn, defectBody, deniedNotRun, designedRefusal, dogfoodAccounts, errorLine, failureLine, pluginScript, pluginScripts, priorErrors, scriptLast, seen, slugOf, startVersion, syncedRoot, versionsLine, versionsOf } from '../dogfood/text.ts'
 import { NOW, PEEK, ROOT, TEXT, eventsOf, peek, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -190,7 +190,7 @@ describe('plugin_defect', () => {
     }
     expect(body).toContain(`- project root: ${ROOT}`)
     expect(body).toContain('- git: git@github.com:acme/shop.git · feature/ABC-1591-x · abc1234')
-    expect(body).toContain('- plugins: slim 0.10.2, band (version unknown), base 0.9.0, fe 0.5.3')
+    expect(body).toContain('- plugins: slim (installed 0.10.2), band (version unknown), base 0.9.0, fe (installed 0.5.3)')
     expect(body).toMatch(/\n- base root: \/\S+\n/)
     expect(body).not.toContain('claude.ai-synced')
     expect(body).toContain('- surfaces: terminal')
@@ -208,7 +208,26 @@ describe('plugin_defect', () => {
     await report($, { plugin: 'fe' })
     const body = calls.writes.find(x => x.path.startsWith(`${DIR}/${DATE}-fe-`))!.text
     expect(body).toContain('version: "0.4.0"')
-    expect(body).toContain('- plugins: slim 0.10.2, band (version unknown), base 0.9.0, fe 0.4.0 (installed 0.5.3)')
+    expect(body).toContain('- plugins: slim (installed 0.10.2), band (version unknown), base 0.9.0, fe 0.4.0 (installed 0.5.3)')
+  })
+
+  t('the cache dir a Claude Code holding base also holds beats a stale start line; no loaded copy known → the record, labelled', async ($, on) => {
+    const { w, calls } = await installedWorld($, on)
+    const root = JSON.parse(w.files[INSTALLED]!.text).plugins['base@domaine'][0].installPath
+    w.files[INSTALLED] = {
+      text: JSON.stringify({ plugins: { 'base@domaine': [{ installPath: root, version: '0.9.0' }], 'fe@domaine': [{ installPath: '/k/fe/0.5.3', version: '0.5.3' }], 'qa@domaine': [{ installPath: '/k/qa/0.6.1', version: '0.6.1' }] } }),
+      mtimeMs: 0,
+    }
+    for (const f of [`${root}/.in_use/42`, '/k/fe/0.4.0/.in_use/42', '/k/fe/0.5.3/.in_use/7', '/k/qa/0.6.1/x']) w.files[f] = { text: '{}', mtimeMs: 0 }
+    w.files['/k/fe/0.4.0/.claude-plugin/plugin.json'] = { text: '{"name":"fe","version":"0.4.0"}', mtimeMs: 0 }
+    w.files[`${HOME}/.claude/domaine/log/s1/fe.jsonl`] = { text: '{"plugin":"fe","version":"0.3.9","kind":"start"}\n', mtimeMs: 0 }
+    await start($)
+    await report($, { plugin: 'fe' })
+    await report($, { plugin: 'qa', title: 'other' })
+    const fe = calls.writes.find(x => x.path.startsWith(`${DIR}/${DATE}-fe-`))!.text
+    expect(fe).toContain('version: "0.4.0"')
+    expect(fe).toContain('- plugins: slim (version unknown), band (version unknown), base 0.9.0, fe 0.4.0 (installed 0.5.3), qa (installed 0.6.1)')
+    expect(calls.writes.find(x => x.path.startsWith(`${DIR}/${DATE}-qa-`))!.text).toContain('version: "0.6.1"')
   })
 
   t('control characters never reach the slug, the index, the heading or the body', async ($, on) => {
@@ -769,6 +788,19 @@ describe('pure parts', () => {
     const installed = JSON.stringify({ plugins: { 'fe@domaine': [{ version: '0.11.4' }], 'slim@domaine': [{ version: '0.15.2' }], 'band@domaine': [{ version: '0.15.0' }] } })
     const v = versionsOf(installed, '/s/base~g2', '0.12.0', '0.14.1', [], { fe: '0.9.1', slim: '0.1.0', band: '0.15.0' })
     expect(versionsLine(v)).toBe('slim 0.14.1 (installed 0.15.2), band 0.15.0, base 0.12.0, fe 0.9.1 (installed 0.11.4)')
+  })
+
+  test('versionsOf: one held dir beats the start line; two held → the start line only when it names one; none → the start line', () => {
+    const installed = JSON.stringify({ plugins: { 'fe@domaine': [{ version: '0.5.0' }], 'be@domaine': [{ version: '0.4.2' }], 'qa@domaine': [{ version: '0.6.1' }], 'pm@domaine': [{ version: '0.3.0' }] } })
+    const v = versionsOf(installed, '/c/base/0.2.0', '0.2.0', null, [], { fe: '0.3.9', be: '0.4.1', pm: '0.2.0', qa: '0.6.0' }, { fe: ['0.4.0'], be: ['0.4.0', '0.4.1'], pm: ['0.1.0', '0.1.1'], qa: [] })
+    expect(versionsLine(v)).toBe('base 0.2.0, fe 0.4.0 (installed 0.5.0), be 0.4.1 (installed 0.4.2), qa 0.6.0 (installed 0.6.1), pm (installed 0.3.0)')
+  })
+
+  test('marketplaceOf and cacheDirOf: base found after an update moved its record, siblings from its own marketplace', () => {
+    const installed = JSON.stringify({ plugins: { 'base@other': [{ installPath: '/o/base/9.9.9' }], 'fe@other': [{ installPath: '/o/fe/9.9.9' }], 'base@domaine': [{ installPath: '/c/base/0.3.0' }], 'fe@domaine': [{ installPath: '/c/fe/0.5.0' }] } })
+    expect(marketplaceOf(installed, '/c/base/0.2.0')).toBe('domaine')
+    expect(cacheDirOf(installed, '/c/base/0.2.0', 'fe')).toBe('/c/fe')
+    expect(marketplaceOf(installed, '/s/base~g2')).toBeNull()
   })
 
   test('pluginScript: repo and cache paths of the seven plugins only', () => {

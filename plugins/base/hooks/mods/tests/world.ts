@@ -242,7 +242,7 @@ export function world(on: On, over: Partial<World> = {}) {
   on('fs.read', async (_$, e) => {
     calls.fs.push(`read ${e.path}`)
     calls.reads.push(e.path)
-    if (e.path.endsWith('/.claude-plugin/plugin.json')) return { value: w.manifest }
+    if (e.path.endsWith('/.claude-plugin/plugin.json') && !(e.path in w.files)) return { value: w.manifest }
     if (e.path.endsWith('/hooks/conventions-text.json') && !(e.path in w.files)) return { value: JSON.stringify(TEXT) }
     const f = w.files[e.path]
     if (!f) throw enoent(e.path)

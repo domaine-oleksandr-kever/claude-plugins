@@ -39,10 +39,15 @@
 # parallel readers on two frames of one file cannot hand each other half a body.
 #
 # TIMEOUTS: every call gets --connect-timeout 10 and --max-time 120 — except `variables/local`,
-# which gets 300. That one request serialises the file's WHOLE variable library and measured 66 s
-# for 656 KB on a real ELC file, so 120 s is only 2x headroom on a good network. It is also the
-# one request that is cached per FILE key rather than per node, so the long wait is paid once and
-# every later node in the same file reads `<key>.variables.json` off disk.
+# which gets 300, and the node tree, which gets 60. `variables/local` serialises the file's WHOLE
+# variable library and measured 66 s for 656 KB on a real ELC file, so 120 s is only 2x headroom on
+# a good network. It is also the one request that is cached per FILE key rather than per node, so
+# the long wait is paid once and every later node in the same file reads `<key>.variables.json`
+# off disk. The node tree takes ~2 s on a real frame; one that times out or answers 5xx is a frame
+# Figma's REST API will not serve, so it fails at once (`error=figma_timeout` exit 5,
+# `error=figma_server_error` exit 4) and the line names the next step: a Figma connector MCP, else
+# a link to a smaller child frame. Worst-case wait: the node tree 180 s (60 s, the one 429 retry's
+# 60 s sleep, 60 s); a whole run 1260 s (+ variables 300+60+300, render 120+60+120, PNG hop 120).
 #
 # Usage:
 #   figma-rest.sh <figma-url | --file <key> --node <id>> [--out <dir>] [--env <dotenv>]
@@ -98,8 +103,8 @@
 # Exit: 0 ok · 1 an OPTIONAL artifact failed (variables other than 403, the image download) ·
 #       2 usage/precondition (the out-dir gate, a bad URL, no curl/jq) ·
 #       3 the token is missing or malformed ·
-#       4 the API rejected the request (token, unknown node, rate limit) ·
-#       5 transport failure on the one request that is not optional.
+#       4 the API rejected the request (token, unknown node, rate limit, a 5xx on the node tree) ·
+#       5 transport failure (the node tree's 60 s timeout included) on the one request that is not optional.
 set -euo pipefail
 
 # The `# Usage:` block above, verbatim — the suite pins the two together: the header is the
@@ -355,6 +360,7 @@ curl_config_write "$CFG" "$(printf 'header = "X-Figma-Token: %s"' "$TOKEN")" \
 # `note=variables_failed` + exit 1. It gets 300 s of its own.
 CURL_MAX_TIME=120
 CURL_MAX_TIME_VARIABLES=300
+CURL_MAX_TIME_NODES=60
 CURL_OPTS=(-sS --connect-timeout 10 --proto =https --proto-redir =https)
 API=https://api.figma.com
 
@@ -383,13 +389,13 @@ sleep_retry() { # $1 = the Retry-After value ("" = none)
   sleep "$s"
 }
 
-api_get_retry() { # $1 = url, $2 = out file, $3 = --max-time override → http code; one 429 retry
+api_get_retry() { # $1 = url, $2 = out file, $3 = --max-time override → http code; one 429 retry; curl's exit on failure
   local code ra
-  code="$(api_get "$1" "$2" "${3:-}")" || return 1
+  code="$(api_get "$1" "$2" "${3:-}")" || return $?
   if [ "$code" = 429 ]; then
     ra="$(retry_after)"
     sleep_retry "$ra"
-    code="$(api_get "$1" "$2" "${3:-}")" || return 1
+    code="$(api_get "$1" "$2" "${3:-}")" || return $?
   fi
   printf '%s' "$code"
 }
@@ -486,10 +492,17 @@ else
     || { echo "error=out_dir_not_writable out=$OUT_ABS" >&2; exit 2; }
   # Same link, same answer: agents otherwise loop through --force / --out variants.
   STALE_NODE='not retryable, no flag changes this answer; ask for a fresh link — select the layer, Copy link; do not probe neighbouring ids'
-  code="$(api_get_retry "$API/v1/files/$FILE_KEY/nodes?ids=$NODE_Q" "$NODES_PART")" \
-    || { rm -f "$NODES_PART"; echo "error=curl_transport_failed" >&2; exit 5; }
+  NODES_NEXT='Figma REST does not serve this node tree, a re-run gets the same; read the node through a Figma connector MCP when one is listed, else ask for a link to a smaller child frame'
+  nrc=0; code="$(api_get_retry "$API/v1/files/$FILE_KEY/nodes?ids=$NODE_Q" "$NODES_PART" "$CURL_MAX_TIME_NODES")" || nrc=$?
+  if [ "$nrc" -ne 0 ]; then
+    rm -f "$NODES_PART"
+    [ "$nrc" -ne 28 ] || { echo "error=figma_timeout after=${CURL_MAX_TIME_NODES}s path=files/$FILE_KEY/nodes ($NODES_NEXT)" >&2; exit 5; }
+    echo "error=curl_transport_failed" >&2; exit 5
+  fi
   case "$code" in
     2*) ;;
+    5*) rm -f "$NODES_PART"
+        echo "error=figma_server_error http=$code path=files/$FILE_KEY/nodes ($NODES_NEXT)" >&2; exit 4 ;;
     401|403) rm -f "$NODES_PART"; reject_auth "$code" ;;
     404) rm -f "$NODES_PART"
          echo "error=node_not_found file_key=$FILE_KEY node_id=$NODE_ID http=404 (Figma finds neither this file nor this node — deleted, moved, or a stale link; \`--probe\` tells them apart: ok=1 = the file answers, so it is the node, error=file_not_found = the file itself is gone; $STALE_NODE)" >&2; exit 4 ;;

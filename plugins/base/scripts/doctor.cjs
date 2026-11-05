@@ -18,7 +18,8 @@
  * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, base-tmp, event-log,
  * copy:<name> (per Domaine plugin with both an install record and a claude.ai-synced copy: which one this
  * session loaded and whether the synced one is older: WARN), cache (only when the plugin cache holds a Domaine version no install record names: WARN), delegate (the
- * edit-delegation model and why; SKIP when BASE_EDIT_MODEL=0), switches (only when a BASE_* switch holds a value outside its README domain: WARN). Every row is one
+ * edit-delegation model and why; SKIP when BASE_EDIT_MODEL=0), switches (only when a BASE_* switch holds a value outside its README domain: WARN),
+ * zsh-glob (only when the login shell is zsh: WARN when no .zshenv/.zshrc under ZDOTDIR or home turns nomatch off). Every row is one
  * PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads
  * BASE_TMP_TTL (the age the session sweep removes base-tmp files at), DOMAINE_LOG_DIR and every BASE_*
  * switch. It only reports, never repairs.
@@ -517,6 +518,38 @@ function checkSwitches(env) {
   if (bad.length) warn('switches', bad.join('; '));
 }
 
+/**
+ * zsh's nomatch fails a whole Bash tool command on one unmatched glob (`no matches found: --include=*.liquid`); the
+ * tool's shell reads .zshenv and .zshrc (ZDOTDIR, exported or set in ~/.zshenv, else home). Never a FAIL: the fix is the user's startup file.
+ */
+function checkZshGlob(homeDir, env) {
+  if (path.basename(env.SHELL || '') !== 'zsh') return;
+  let zdot = (env.ZDOTDIR || '').trim();
+  try {
+    // A ZDOTDIR that ~/.zshenv sets without exporting still moves .zshrc, though the doctor's env never sees it.
+    const m = zdot ? null : fs.readFileSync(path.join(homeDir, '.zshenv'), 'utf8').match(/^[ \t]*(?:export[ \t]+)?ZDOTDIR=["']?([^"'\s;#]+)/m);
+    if (m) zdot = m[1].replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, homeDir);
+  } catch (_) {}
+  const dirs = [...new Set([zdot, homeDir].filter((d) => d && path.isAbsolute(d)))];
+  const files = dirs.flatMap((d) => [path.join(d, '.zshenv'), path.join(d, '.zshrc')]);
+  const off = (text) => text.split('\n').some((line) => {
+    for (const m of line.replace(/(^|\s)#.*$/, '').matchAll(/(?:^|[;&|\s])(setopt|unsetopt)\s+([^;&|]*)/g)) {
+      const opts = m[2].trim().split(/\s+/).map((o) => o.toLowerCase().replace(/_/g, ''));
+      if (opts.includes(m[1] === 'setopt' ? 'nonomatch' : 'nomatch')) return true;
+    }
+    return false;
+  });
+  const hit = files.find((f) => {
+    try {
+      return off(fs.readFileSync(f, 'utf8'));
+    } catch (_) {
+      return false;
+    }
+  });
+  if (hit) pass('zsh-glob', 'nomatch is off in ' + hit);
+  else warn('zsh-glob', 'login shell is zsh and no ' + files.join(' / ') + ' turns nomatch off: one unmatched glob (--include=*.liquid) fails the whole Bash tool command — add `setopt nonomatch` to ' + path.join(dirs[0], '.zshrc'));
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const pluginRoot = path.resolve(opts.root || path.join(__dirname, '..'));
@@ -538,6 +571,7 @@ function main() {
   checkCache(claudeDir);
   checkDelegation(homeDir, opts.home ? undefined : process.env.CLAUDE_CONFIG_DIR, pluginRoot);
   checkSwitches(process.env);
+  checkZshGlob(homeDir, process.env);
 
   const failed = rows.some((r) => r.status === 'FAIL');
   if (opts.json) {

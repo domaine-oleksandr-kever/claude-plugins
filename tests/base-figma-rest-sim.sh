@@ -122,6 +122,8 @@ esac
 if [ "$code" = 429 ] && [ -n "$hdr" ]; then
   printf 'HTTP/2 429\r\nRetry-After: %s\r\n\r\n' "${FAKE_RETRY_AFTER:-7}" > "$hdr"
 fi
+# `x<n>` = curl itself failed with exit n (28 = --max-time hit): no answer, http_code 000
+case "$code" in x*) printf '000'; exit "${code#x}" ;; esac
 printf '%s' "$code"
 FAKE
 
@@ -483,8 +485,23 @@ rc=0; FAKE_HTTP_NODES=403 fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
 assert F5-403 4 "$rc" "$E" "error=token_rejected http=403"
 if grep -qF 'references/figma-rest.md' "$E"; then ok
 else bad F5-403-hint "the rejection does not point at the walk-through"; fi
+# F5c: a node tree Figma will not serve (5xx, or the 60 s --max-time hit) fails at once with the next step —
+# the connector, else a smaller child frame — never a 120 s wait; any other transport failure stays generic.
+F5C_NEXT='Figma REST does not serve this node tree, a re-run gets the same; read the node through a Figma connector MCP when one is listed, else ask for a link to a smaller child frame'
 rc=0; FAKE_HTTP_NODES=500 fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
-assert F5-500 4 "$rc" "$E" "error=figma_request_failed http=500"
+assert F5-500 4 "$rc" "$E" "error=figma_server_error http=500 path=files/$KEY/nodes ($F5C_NEXT)"
+ARGV5="$TMP/argv5"; : > "$ARGV5"
+rc=0; CURL_ARGV="$ARGV5" FAKE_HTTP_NODES=x28 fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
+assert F5c-timeout 5 "$rc" "$E" "error=figma_timeout after=60s path=files/$KEY/nodes ($F5C_NEXT)"
+if grep -F '/nodes?ids=' "$ARGV5" | grep -qF -- '--max-time 60 ' && [ "$(grep -c '/variables/local\|/v1/images/' "$ARGV5")" = 0 ] \
+   && [ -z "$(find "$OUT5" -name '*.part' 2>/dev/null)" ]; then ok
+else bad F5c-timeout-bound "argv=$(tr '\n' ';' < "$ARGV5" | head -c 300) files=$(ls "$OUT5" 2>/dev/null | tr '\n' ' ')"; fi
+SLP="$TMP/sleep5t"; : > "$SLP"
+rc=0; SLEEP_LOG="$SLP" FAKE_HTTP_NODES=429,x28 fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
+assert F5c-429-then-timeout 5 "$rc" "$E" "error=figma_timeout after=60s"
+rc=0; FAKE_HTTP_NODES=x7 fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
+assert F5c-transport 5 "$rc" "$E" "error=curl_transport_failed"
+if ! grep -qF 'figma_timeout' "$E"; then ok; else bad F5c-transport-not-timeout "err=$(head -c 200 "$E")"; fi
 # 200 with a null node: a body that parses perfectly and carries no design at all
 rc=0; FAKE_NODE_NULL=1 fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
 assert F5-null-node 4 "$rc" "$E" "error=node_not_found"
@@ -612,11 +629,15 @@ else bad F6-variables-max-time "the variables call did not carry --max-time 300:
 otherlong="$(grep -F -- '--max-time 300' "$ARGV" | grep -vF '/variables/local' || true)"
 if [ -z "$otherlong" ]; then ok
 else bad F6-long-timeout-scoped "--max-time 300 leaked onto another call: $otherlong"; fi
-for u in '/nodes?' '/v1/images/' 'https://s3.example.com/'; do
+for u in '/v1/images/' 'https://s3.example.com/'; do
   l="$(grep -F "$u" "$ARGV" | head -1)"
   if [ -n "$l" ] && printf '%s' "$l" | grep -qF -- '--max-time 120'; then ok
   else bad F6-short-max-time "the $u call did not carry --max-time 120: $l"; fi
 done
+# the node tree is ~2 s on a real frame: 60 s, so a tree Figma will not serve fails fast (F5c)
+l="$(grep -F '/nodes?' "$ARGV" | head -1)"
+if [ -n "$l" ] && printf '%s' "$l" | grep -qF -- '--max-time 60 '; then ok
+else bad F6-nodes-max-time "the /nodes? call did not carry --max-time 60: $l"; fi
 # `-L` must never ride the config: a redirect would carry the token off api.figma.com
 if ! grep -E -- '(^| )-K ' "$ARGV" | grep -qE -- '(^| )-L( |$)'; then ok
 else bad F6-follow-with-config "a -K call also passed -L: $(grep -E -- '(^| )-K ' "$ARGV" | head -1)"; fi

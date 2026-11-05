@@ -14,6 +14,7 @@ import {
   TOOL_SCHEMA,
   bashFailed,
   bashText,
+  cacheDirOf,
   crashedIn,
   defectBody,
   deniedNotRun,
@@ -127,10 +128,35 @@ async function started($: $, sid: string): Promise<Partial<Record<Plugin, string
   return out
 }
 
+const inUse = async ($: $, dir: string): Promise<string[]> =>
+  (await $.fs.list(`${dir}/.in_use`).catch(() => [])).map(f => f.name).filter(n => /^\d+$/.test(n))
+
+/**
+ * Per sibling with an install record, the versions of its cache dirs whose `.in_use` names a pid that also holds base's root:
+ * the copy a Claude Code running this base loaded. Nothing when base's root has no `.in_use` (a synced or --plugin-dir load).
+ */
+async function held($: $, installed: string | null): Promise<Partial<Record<Plugin, string[]>>> {
+  const out: Partial<Record<Plugin, string[]>> = {}
+  const pids = await inUse($, $.plugin.root)
+  if (!pids.length) return out
+  for (const p of PLUGINS) {
+    const dir = p === 'base' ? null : cacheDirOf(installed, $.plugin.root, p)
+    if (!dir) continue
+    const vs: string[] = []
+    for (const e of await $.fs.list(dir).catch(() => [])) {
+      if (e.kind !== 'dir' || !(await inUse($, `${dir}/${e.name}`)).some(x => pids.includes(x))) continue
+      const v = await $.fs.read(`${dir}/${e.name}/.claude-plugin/plugin.json`).then(t => (JSON.parse(t) as { version?: unknown }).version, () => null)
+      vs.push(typeof v === 'string' && v ? v : e.name)
+    }
+    out[p] = vs
+  }
+  return out
+}
+
 async function versions($: $, installed: string | null, sid: string): Promise<Versions> {
   const slim = (await read($, slimInfo).catch(() => null))?.version ?? null
   const enabled = enabledNames(await $.settings.read().catch(() => null))
-  return versionsOf(installed, $.plugin.root, await ownVersion($), slim, enabled, await started($, sid))
+  return versionsOf(installed, $.plugin.root, await ownVersion($), slim, enabled, await started($, sid), await held($, installed))
 }
 
 async function git($: $, root: string, args: string[]): Promise<string | null> {
@@ -228,7 +254,7 @@ async function report($: $, d: Defect): Promise<string> {
   const surfaces = await $.session.surfaces().catch(() => null)
   const surfaceless = surfaces?.length === 0
   const claudeCode = (await $.session.version().catch(() => null))?.version ?? null
-  const body = defectBody(d, { version: v.get(d.plugin)?.loaded ?? 'unknown', date, session: sid, workId }, {
+  const body = defectBody(d, { version: v.get(d.plugin)?.loaded ?? v.get(d.plugin)?.installed ?? 'unknown', date, session: sid, workId }, {
     root,
     pluginRoot: $.plugin.root,
     remote,

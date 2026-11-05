@@ -5,7 +5,8 @@
 # servers) are the mod's and live in plugins/base/hooks/mods/tests/doctor.test.ts. Exit 0 = all green.
 set -u
 unset CLAUDE_CONFIG_DIR BASE_AUTOSAVE BASE_TMP_TTL DOMAINE_LOG_DIR BASE_EVENT_LOG BASE_GUARD BASE_LEAN BASE_SCRATCH_GUARD \
-  BASE_SESSION_TITLE BASE_STE BASE_FIGMA_SOURCE BASE_DOGFOOD BASE_DOGFOOD_REPO BASE_EDIT_MODEL ANTHROPIC_API_KEY
+  BASE_SESSION_TITLE BASE_STE BASE_FIGMA_SOURCE BASE_DOGFOOD BASE_DOGFOOD_REPO BASE_EDIT_MODEL ANTHROPIC_API_KEY ZDOTDIR
+export SHELL=/bin/bash
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOCTOR="$ROOT/plugins/base/scripts/doctor.cjs"
@@ -370,6 +371,31 @@ expect CD51-delegate-api-key 0 "edit delegation: sonnet (api-key session)" "!sk-
 rc=0; ANTHROPIC_API_KEY=sk-x node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" --json >"$O" 2>"$E" || rc=$?
 expect CD51b-delegate-api-key-json 0 '"name":"delegate"' "!sk-x"
 rm -rf "$H/.claude.json" "$TMP/cfg"
+
+# -------------------------------------------------------------------------------- zsh-glob --
+# A zsh login shell whose .zshenv/.zshrc (ZDOTDIR, else home) never turns nomatch off WARNs with the one-line fix —
+# never a FAIL; any spelling zsh accepts passes; a comment does not count; another shell gets no row.
+zg() { rc=0; env SHELL="$1" ${2:+ZDOTDIR="$2"} node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?; }
+rm -f "$H/.zshrc" "$H/.zshenv"
+zg /bin/bash; expect CD52-zsh-glob-other-shell 0 "!zsh-glob"
+zg /bin/zsh; expect CD53-zsh-glob-warn 0 "WARN  zsh-glob" "add \`setopt nonomatch\` to $H/.zshrc" "!FAIL"
+printf 'export PATH=/x\n# setopt nonomatch\n' > "$H/.zshrc"
+zg /usr/local/bin/zsh; expect CD54-zsh-glob-comment 0 "WARN  zsh-glob"
+for line in 'setopt nonomatch' 'setopt extendedglob NO_NOMATCH' 'unsetopt nomatch' 'alias x=y; setopt no_nomatch  # globs'; do
+  printf 'export PATH=/x\n%s\n' "$line" > "$H/.zshrc"
+  zg /bin/zsh; expect "CD55-zsh-glob-off:$line" 0 "PASS  zsh-glob" "nomatch is off in $H/.zshrc"
+done
+rm -f "$H/.zshrc"; printf 'setopt nonomatch\n' > "$H/.zshenv"
+zg /bin/zsh; expect CD56-zsh-glob-zshenv 0 "PASS  zsh-glob" "nomatch is off in $H/.zshenv"
+rm -f "$H/.zshenv"; mkdir -p "$TMP/zdot"; printf 'unsetopt NOMATCH\n' > "$TMP/zdot/.zshrc"
+zg /bin/zsh "$TMP/zdot"; expect CD57-zsh-glob-zdotdir 0 "PASS  zsh-glob" "nomatch is off in $TMP/zdot/.zshrc"
+rm -f "$TMP/zdot/.zshrc"
+zg /bin/zsh "$TMP/zdot"; expect CD58-zsh-glob-zdotdir-warn 0 "WARN  zsh-glob" "add \`setopt nonomatch\` to $TMP/zdot/.zshrc"
+printf 'ZDOTDIR=$HOME/zd\n' > "$H/.zshenv"; mkdir -p "$H/zd"; printf 'setopt nonomatch\n' > "$H/zd/.zshrc"
+zg /bin/zsh; expect CD58b-zsh-glob-zshenv-zdotdir 0 "PASS  zsh-glob" "nomatch is off in $H/zd/.zshrc"
+rm -f "$H/zd/.zshrc"; zg /bin/zsh; expect CD58c-zsh-glob-zshenv-zdotdir-warn 0 "WARN  zsh-glob" "add \`setopt nonomatch\` to $H/zd/.zshrc"
+rm -rf "$H/.zshenv" "$H/zd"
+rm -rf "$TMP/zdot"
 
 # The suite never touched the real checkout.
 if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then ok; else bad CD-head "HEAD moved"; fi

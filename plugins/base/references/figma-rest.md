@@ -173,8 +173,8 @@ stderr carries `note=` lines and always ends with the summary
 | 1 | an **optional** artifact failed — variables (non-403) or the image download; the tree is complete | rows say `failed` |
 | 2 | usage or precondition | `invalid_file_key`, `invalid_node_id`, `missing_node_id`, `missing_file_key`, `conflicting_target`, `conflicting_mode`, `invalid_scale`, `unknown_arg`, `unexpected_arg`, `missing_value`, `curl_not_found`, `jq_not_found`, `curl_config_unwritable`, `common_lib_not_found`, `out_dir_not_in_repo`, `out_dir_not_ignored`, `out_dir_not_writable` |
 | 3 | credentials | `no_figma_token` (+ the setup `hint=`), `invalid_figma_token` |
-| 4 | the API rejected the request | `token_rejected` (+ hint; 401 and 403 both), `node_not_found`, `file_not_found` (`--probe`), `rate_limited`, `figma_request_failed http=<code>` |
-| 5 | curl transport failure | `curl_transport_failed` |
+| 4 | the API rejected the request | `token_rejected` (+ hint; 401 and 403 both), `node_not_found`, `file_not_found` (`--probe`), `rate_limited`, `figma_request_failed http=<code>`, `figma_server_error http=<code>` (a 5xx on the node tree) |
+| 5 | curl transport failure | `curl_transport_failed`, `figma_timeout after=60s` (the node tree) |
 
 A **404**, and a `200` whose `nodes.<id>` is null or absent, are both `node_not_found`: Figma
 answers 200 with a null node for an id that does not exist in that file. It is not retryable — no
@@ -184,7 +184,10 @@ a 429. A 404 can also mean the file itself is gone — `--probe` tells them apar
 that is empty or not JSON is `figma_request_failed http=<code>` (a proxy or transport artifact;
 re-run once). A **429** is retried **once**, honouring `Retry-After` clamped into 1–60 s
 (`Retry-After: 0` means "retry now", an hour means "run this later, not now"); a second 429 on the
-node request is `error=rate_limited`, exit 4.
+node request is `error=rate_limited`, exit 4. A **5xx** or a **timeout** on the node tree fails at once
+(`figma_server_error`, `figma_timeout`; at most 180 s with the one 429 retry): Figma REST will not
+serve that tree and a re-run gets the same, so read it through a Figma connector MCP when one is
+listed, else ask for a link to a smaller child frame.
 
 Runs are **idempotent**. A `<key>-<node>.nodes.json` already on disk that is non-empty valid JSON
 carrying the node is `cached` — no request — and the same rule covers the variables file and a
@@ -195,7 +198,7 @@ superseded bytes. `--force` re-fetches everything.
 
 `variables/local` is the slow one — it serialises the file's whole variable library and takes about
 a minute on a large one (66 s for 656 KB on a real read, against ~2 s for the node tree and ~4 s
-for the render) — so it gets a `--max-time` of **300 s** where every other call gets 120, and it is
+for the render) — so it gets a `--max-time` of **300 s**, the node tree **60 s** and every other call 120, and it is
 cached per **file key**: every later node in the same file reuses `<key>.variables.json` and pays
 that wait exactly once.
 

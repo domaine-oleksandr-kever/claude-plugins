@@ -110,8 +110,48 @@ function dogfoodOn() {
   return !!id && !!accounts && typeof accounts === 'object' && !Array.isArray(accounts) && Object.prototype.hasOwnProperty.call(accounts, id);
 }
 
-/** `slim 0.13.0, band (version unknown), base 0.10.4, …`: install records, then synced copies, base's own manifest; enabled names without a version. */
-function versionsLine(cwd) {
+/** The live numeric pids under `<dir>/.in_use`: the Claude Code processes that loaded that copy. */
+function holders(dir) {
+  try {
+    return fs.readdirSync(dir + '/.in_use').filter((p) => {
+      if (!/^\d+$/.test(p)) return false;
+      try {
+        process.kill(Number(p), 0);
+        return true;
+      } catch (e) {
+        return e.code === 'EPERM';
+      }
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** The version on the last `start` line of `<dir>/<p>.jsonl` (the plugin's mod wrote it this session); null without one. */
+function startVersion(dir, p) {
+  let lines = [];
+  try {
+    lines = fs.readFileSync(dir + '/' + p + '.jsonl', 'utf8').split('\n');
+  } catch {
+    return null;
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"kind":"start"')) continue;
+    try {
+      const l = JSON.parse(lines[i]);
+      if (l.plugin === p && typeof l.version === 'string' && l.version) return l.version;
+    } catch {}
+  }
+  return null;
+}
+
+/**
+ * `slim 0.13.0, fe 0.14.0 (installed 0.15.0), qa (installed 0.5.0), …`: what each plugin loaded (base's own manifest; for a
+ * sibling the one cache version dir this session's Claude Code holds, else its start line in this session's log when that names
+ * one of the held dirs or none is held, else a synced copy without a record) beside its install record when they differ; a record
+ * without a known loaded copy is labelled installed; enabled names without either stand without a version.
+ */
+function versionsLine(cwd, sid) {
   const home = abs(process.env.HOME);
   const cfg = abs(process.env.CLAUDE_CONFIG_DIR) || home + '/.claude';
   const recs = [];
@@ -119,7 +159,23 @@ function versionsLine(cwd) {
     const at = key.lastIndexOf('@');
     if (at > 0 && Array.isArray(list)) for (const r of list) if (r && typeof r === 'object') recs.push([key.slice(0, at), key.slice(at + 1), r]);
   }
-  const mk = (recs.find(([n, , r]) => n === 'base' && r.installPath === ROOT) || [])[1];
+  const ownRec = (r) => typeof r.installPath === 'string' && (r.installPath === ROOT || path.dirname(r.installPath) === path.dirname(ROOT));
+  const mk = (recs.find(([n, , r]) => n === 'base' && ownRec(r)) || [])[1];
+  const mine = holders(ROOT);
+  const pids = mine.includes(String(process.ppid)) ? [String(process.ppid)] : mine;
+  const held = (r) => {
+    if (!pids.length || typeof r.installPath !== 'string') return [];
+    const parent = path.dirname(r.installPath);
+    let vs = [];
+    try {
+      vs = fs.readdirSync(parent).filter((v) => holders(parent + '/' + v).some((p) => pids.includes(p)));
+    } catch {}
+    return vs.map((d) => {
+      const v = (readJson(parent + '/' + d + '/.claude-plugin/plugin.json') || {}).version;
+      return typeof v === 'string' && v ? v : d;
+    });
+  };
+  const dir = logDir(sid);
   const enabled = {};
   for (const f of [cfg + '/settings.json', cwd + '/.claude/settings.json', cwd + '/.claude/settings.local.json']) {
     const e = (readJson(f) || {}).enabledPlugins;
@@ -142,9 +198,13 @@ function versionsLine(cwd) {
   const out = [];
   for (const p of PLUGINS) {
     const rec = recs.find(([n, m]) => n === p && m === mk) || recs.find(([n]) => n === p);
+    const inst = rec && typeof rec[2].version === 'string' && rec[2].version ? rec[2].version : null;
+    const vs = rec ? held(rec[2]) : [];
+    const started = dir && startVersion(dir, p);
     const v = p === 'base' ? (typeof own === 'string' && own ? own : null)
-      : rec && typeof rec[2].version === 'string' ? rec[2].version : rec ? null : syncedVersion(p);
-    if (v !== null || p === 'base' || enabled[p]) out.push(v ? p + ' ' + v : p + ' (version unknown)');
+      : vs.length === 1 ? vs[0] : vs.length ? (vs.includes(started) ? started : null) : started || (rec ? null : syncedVersion(p));
+    if (v === null && inst === null && p !== 'base' && !enabled[p]) continue;
+    out.push(v ? p + ' ' + v + (inst && inst !== v ? ' (installed ' + inst + ')' : '') : inst ? p + ' (installed ' + inst + ')' : p + ' (version unknown)');
   }
   return out.join(', ');
 }
@@ -178,8 +238,8 @@ function syncedCopyLine(cwd) {
 }
 const surfaceless = () => (process.env.CLAUDE_CODE_ENTRYPOINT || '').startsWith('sdk') || process.env.CLAUDE_CODE_REMOTE === 'true';
 
-function dogfoodSection(cwd) {
-  return T_().dogfood.split('{versions}').join(versionsLine(cwd)).split('{rule}').join(T_()[surfaceless() ? 'rule-surfaceless' : 'rule-drawn']);
+function dogfoodSection(cwd, sid) {
+  return T_().dogfood.split('{versions}').join(versionsLine(cwd, sid)).split('{rule}').join(T_()[surfaceless() ? 'rule-surfaceless' : 'rule-drawn']);
 }
 
 /** The edit-delegation decision (scripts/edit-delegation.cjs decides; the doctor asks the same); null without the module. */
@@ -187,12 +247,12 @@ const editDecision = () => (ED_() ? ED_().editDelegation({ env: process.env, hom
 const editSection = (d) => T_()['edit-delegation'].split('{model}').join(d.model).split('{why}').join(ED_().whyText(d));
 
 /** The start part's sections in session order: `{ sections: [name…], text, edit }`, text '' when none is on; `edit` the rules part's delegation decision. */
-function startPart(part, cwd) {
+function startPart(part, cwd, sid) {
   const edit = part === 'core' ? null : editDecision();
   const names = part === 'core'
     ? ['root', 'comment-discipline', 'task-workspace', 'untrusted-content', 'shopify']
     : [process.env.BASE_LEAN !== '0' && 'lean-code', process.env.BASE_STE !== '0' && 'writing-style', edit && edit.model && 'edit-delegation', dogfoodOn() && 'dogfood'].filter(Boolean);
-  const text = names.map((n) => (n === 'dogfood' ? dogfoodSection(cwd) : n === 'edit-delegation' ? editSection(edit)
+  const text = names.map((n) => (n === 'dogfood' ? dogfoodSection(cwd, sid) : n === 'edit-delegation' ? editSection(edit)
     : n === 'root' ? [section(n), syncedCopyLine(cwd)].filter(Boolean).join('\n') : section(n))).join('\n\n');
   return { sections: names, text, edit };
 }
@@ -201,7 +261,7 @@ function startPart(part, cwd) {
  * A subagent's share: root line and outside content; comment discipline and lean code for a code agent; writing style
  * for a drafter (BASE_STE); dogfood when on. Never edit delegation. '' for a fork.
  */
-function subagentText(agentType, cwd) {
+function subagentText(agentType, cwd, sid) {
   if (agentType === 'fork') return '';
   const parts = [section('root'), section('untrusted-content')];
   if (!NO_CODE_AGENT.test(agentType)) {
@@ -209,7 +269,7 @@ function subagentText(agentType, cwd) {
     if (process.env.BASE_LEAN !== '0') parts.push(section('lean-code'));
   }
   if (DRAFTER_AGENT.test(agentType) && process.env.BASE_STE !== '0') parts.push(section('writing-style'));
-  if (dogfoodOn()) parts.push(dogfoodSection(cwd));
+  if (dogfoodOn()) parts.push(dogfoodSection(cwd, sid));
   return parts.join('\n\n');
 }
 
@@ -298,7 +358,7 @@ function main(argv) {
   const input = readStdin();
   const cwd = typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : process.cwd();
   if (mode === 'start' && (part === 'core' || part === 'rules')) {
-    const r = startPart(part, cwd);
+    const r = startPart(part, cwd, input.session_id);
     if (!r.text) return;
     process.stdout.write(envelope('SessionStart', r.text));
     const { label, org, file } = login();
@@ -310,7 +370,7 @@ function main(argv) {
     });
   } else if (mode === 'subagent') {
     recordAgent(input.session_id, input.agent_id, input.agent_type);
-    const text = subagentText(typeof input.agent_type === 'string' ? input.agent_type : '', cwd);
+    const text = subagentText(typeof input.agent_type === 'string' ? input.agent_type : '', cwd, input.session_id);
     if (text) process.stdout.write(envelope('SubagentStart', text));
   } else if (mode === 'stop') {
     let saveReason = null;

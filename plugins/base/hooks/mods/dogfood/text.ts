@@ -189,9 +189,23 @@ function records(installed: string | null): [string, string, Record_][] {
   }
 }
 
-/** The marketplace base was installed from: the record whose install path is base's root; null for a --plugin-dir or synced load. */
+const parentOf = (p: string) => p.slice(0, p.lastIndexOf('/'))
+
+/**
+ * The marketplace base was installed from: the record whose install path is base's root, or a sibling version dir of it (an
+ * update moved the record on); null for a --plugin-dir or synced load.
+ */
 export function marketplaceOf(installed: string | null, root: string): string | null {
-  return records(installed).find(([name, , r]) => name === 'base' && r.installPath === root)?.[1] ?? null
+  const own = (r: Record_) => typeof r.installPath === 'string' && (r.installPath === root || parentOf(r.installPath) === parentOf(root))
+  return records(installed).find(([name, , r]) => name === 'base' && own(r))?.[1] ?? null
+}
+
+/** The cache dir holding a plugin's version dirs, from its install record (base's marketplace first); null without one. */
+export function cacheDirOf(installed: string | null, root: string, plugin: Plugin): string | null {
+  const mk = marketplaceOf(installed, root)
+  const recs = records(installed)
+  const p = (recs.find(([n, m]) => n === plugin && m === mk) ?? recs.find(([n]) => n === plugin))?.[2].installPath
+  return typeof p === 'string' && p.includes('/') ? parentOf(p) : null
 }
 
 /** A root under `plugins/synced/<account>/`: the copy claude.ai synced, which has no install record. */
@@ -213,9 +227,10 @@ export function startVersion(jsonl: string | null, plugin: string): string | nul
 export type Versions = Map<Plugin, { loaded: string | null; installed: string | null }>
 
 /**
- * Each Domaine plugin this session can name: the version it loaded (base's own manifest, slim's info atom, the
- * plugin's start line in this session's log, else the install record) and the install record's version (base's
- * marketplace first); a plugin enabled in settings without either stands without a version.
+ * Each Domaine plugin this session can name: the version it loaded (base's own manifest, slim's info atom; else the one cache
+ * version dir `held` names, the start line in this session's log when it names one of the held dirs or none is held) and the
+ * install record's version (base's marketplace first); loaded stays null when unknown; a plugin enabled in settings without
+ * either stands without a version.
  */
 export function versionsOf(
   installed: string | null,
@@ -224,6 +239,7 @@ export function versionsOf(
   slim: string | null,
   enabled: readonly string[],
   started: Partial<Record<Plugin, string>> = {},
+  held: Partial<Record<Plugin, string[]>> = {},
 ): Versions {
   const mk = marketplaceOf(installed, root)
   const recs = records(installed)
@@ -231,17 +247,24 @@ export function versionsOf(
   for (const p of PLUGINS) {
     const rec = recs.find(([n, m]) => n === p && m === mk) ?? recs.find(([n]) => n === p)
     const recorded = typeof rec?.[2].version === 'string' ? rec[2].version : null
-    const loaded = p === 'base' ? own : (p === 'slim' && slim) || started[p] || recorded
-    if (loaded !== null || p === 'base' || enabled.includes(p)) out.set(p, { loaded, installed: recorded })
+    const hs = held[p] ?? []
+    const s = started[p] ?? null
+    const loaded = p === 'base' ? own : (p === 'slim' && slim) || (hs.length === 1 ? hs[0]! : hs.length ? (s && hs.includes(s) ? s : null) : s)
+    if (loaded !== null || recorded !== null || p === 'base' || enabled.includes(p)) out.set(p, { loaded, installed: recorded })
   }
   return out
 }
 
-/** `fe 0.9.1 (installed 0.11.4)` where the loaded version is not the install record's: a synced or --plugin-dir copy. */
+/**
+ * `fe 0.9.1 (installed 0.11.4)` where the loaded version is not the install record's (a session older than an update, a synced
+ * or --plugin-dir copy); `fe (installed 0.11.4)` where the loaded copy is unknown.
+ */
 export function versionsLine(v: Versions): string {
   return [...v]
     .map(([p, { loaded, installed }]) =>
-      loaded ? `${p} ${loaded}${installed && installed !== loaded ? ` (installed ${installed})` : ''}` : `${p} (version unknown)`,
+      loaded
+        ? `${p} ${loaded}${installed && installed !== loaded ? ` (installed ${installed})` : ''}`
+        : installed ? `${p} (installed ${installed})` : `${p} (version unknown)`,
     )
     .join(', ')
 }
