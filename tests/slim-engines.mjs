@@ -269,6 +269,42 @@ function ecRows() {
     check('EC-diff-window-only', r.engine === 'text' && r.text.split('\n').filter((l) => !l.startsWith('[slim: ')).every((l) => lines.includes(l)), r.engine);
   }
   {
+    const css = Array.from({ length: 1500 }, (_, i) => `.c${i}{color:#${(i * 7919 % 0xffffff).toString(16).padStart(6, '0')};margin:${i % 9}px}`).join('');
+    const ctx = Array.from({ length: 30 }, (_, i) => ` {%- comment -%} line ${i} {%- endcomment -%}`);
+    const head = ['diff --git a/snippets/@critical-css.liquid b/snippets/@critical-css.liquid', 'index 1111111..2222222 100644', '--- a/snippets/@critical-css.liquid', '+++ b/snippets/@critical-css.liquid', '@@ -1,61 +1,61 @@'];
+    const d = [...head, ...ctx, `-<style>${css}</style>`, `+<style>${css.replace('.c700{color:', '.c700{colour:')}</style>`, ...ctx, '\\ No newline at end of file'].join('\n');
+    const r = compress({ data: d }, O);
+    const rl = r.text.split('\n');
+    const minus = rl.find((l) => l.startsWith('-['));
+    const plus = rl.find((l) => l.startsWith('+['));
+    check('EC-diff-long-pair-windowed', r.engine === 'text' && r.decision === 'compressed' && bytes(r.text) <= 12288 && !/ lines hidden/.test(r.text)
+      && /^-\[slim: [\d,]+ B hidden\].*\.c700\{color:.*\[slim: [\d,]+ B hidden\]$/.test(minus) && /^\+\[slim: [\d,]+ B hidden\].*\.c700\{colour:.*\[slim: [\d,]+ B hidden\]$/.test(plus), r.text.slice(0, 300));
+    check('EC-diff-long-pair-headers', head.every((h) => rl.includes(h)) && ctx.every((c) => rl.includes(c)), 'a header or context line is missing');
+    const oldL = `-<style>${css}</style>`;
+    const newL = `+<style>${css.replace('.c700{color:', '.c700{colour:')}</style>`;
+    for (const [name, body] of [['extra-removed', ['-{% comment %}old{% endcomment %}', oldL, newL]], ['extra-added', [oldL, '+{% comment %}new{% endcomment %}', newL]]]) {
+      const x = compress({ data: [...head, ...ctx, ...body, ...ctx].join('\n') }, O);
+      check(`EC-diff-long-pair-${name}`, x.decision === 'compressed' && bytes(x.text) <= 12288 && x.text.includes('.c700{color:') && x.text.includes('.c700{colour:')
+        && x.text.includes('{% comment %}'), x.text.slice(0, 300));
+    }
+  }
+  {
+    const hunks = Array.from({ length: 20 }, (_, h) => [`@@ -${h * 50 + 1},41 +${h * 50 + 1},41 @@ section ${h}`,
+      ...Array.from({ length: 20 }, (_, i) => `   {%- assign ctx_${h}_${i} = settings.block_${i} | default: 'value' -%}`),
+      `-  {%- render 'card', size: ${h} -%}`, `+  {%- render 'card', size: ${h + 1} -%}`,
+      ...Array.from({ length: 20 }, (_, i) => `   {%- assign tail_${h}_${i} = settings.block_${i} | default: 'value' -%}`)]).flat();
+    const d = ['diff --git a/sections/main.liquid b/sections/main.liquid', '--- a/sections/main.liquid', '+++ b/sections/main.liquid', ...hunks].join('\n');
+    const r = compress({ data: d }, { ...O, plainBytes: 8192, budgetBytes: 8192 });
+    const rl = r.text.split('\n');
+    const changed = d.split('\n').filter((l) => /^[-+] /.test(l) || l.startsWith('@@'));
+    check('EC-diff-multi-hunk-changes-kept', r.decision === 'compressed' && bytes(r.text) <= 8192 && changed.every((l) => rl.includes(l)) && / of [\d,]+ lines hidden \([\d,]+ B\)\]/.test(r.text), `${bytes(r.text)} ${r.text.slice(0, 200)}`);
+    check('EC-diff-multi-hunk-verbatim', rl.filter((l) => !l.startsWith('[slim: ')).every((l) => d.split('\n').includes(l)), 'a line was rewritten');
+  }
+  {
+    const d = ['diff --git a/x b/x', '--- a/x', '+++ b/x', '@@ -1 +1 @@', `-${'a'.repeat(3000)}`, `+${'a'.repeat(3000)}b`].join('\n');
+    eq('EC-diff-under-budget', [compress({ data: d }, O).decision, compress({ data: d }, O).text === d], ['passthrough', true]);
+  }
+  {
     const env = JSON.stringify({ isError: true, content: [{ type: 'text', text: JQL }] });
     const r = compress({ data: env }, O);
     eq('EC-error-shape', [r.decision, r.reason], ['passthrough', 'error-shape']);

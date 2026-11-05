@@ -254,7 +254,14 @@ at or under `plainBytes` nothing happens; above it the head keeps whole lines up
 `[slim: <hidden> of <total> lines hidden (<bytes> B)]`. Fewer than 3 lines, a first/last line that
 overflows its share, or whole lines that fill less than half of `budgetBytes`, falls back to a
 character window with `[slim: <bytes> B hidden]`. No line is
-rewritten.
+rewritten — except in a diff (sniff's `diff` guard), where a changed line is never hidden for its
+length: a -/+ pair over 1,024 B (an overlong line pairs with the line across its change block that
+shares the longest common prefix plus suffix with it, not the one at the same position) keeps 160 B of the pair's common prefix and suffix around the
+fragment that changed (the fragment itself capped at 1,024 B), an unpaired overlong body line keeps
+its first and last 512 B, each cut an inline `[slim: <bytes> B hidden]`; file and hunk headers stay.
+A diff still over budget then loses whole runs of unchanged context, largest first, each run one
+`[slim: <hidden> of <total> lines hidden (<bytes> B)]` line; only a diff whose headers and changed
+lines alone overflow falls back to the head/tail window. `window` counts every cut.
 
 **a11y** — a Playwright or Chrome DevTools MCP accessibility snapshot in its own grammar, the lines
 around the tree kept verbatim. A nameless, ref-less `generic`/`none` wrapper is flattened into its

@@ -38,7 +38,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.17.1**.
+Current release: **slim v0.17.2**.
 
 ## Install
 
@@ -274,6 +274,9 @@ the tail (the rest). One marker line sits between them:
 
 slim uses a character window (`[slim: <N> B hidden]`) for a text of fewer than three lines, for one
 long line, or for whole lines that fill less than half the budget (a huge line between short ones).
+A `git diff` never hides a changed line for its length: a long changed line keeps a window around
+the part that changed, with `[slim: <N> B hidden]` in the line for each cut. A diff still over budget
+hides runs of unchanged context first.
 The budgets are 4,096 B for a Bash output the host saved to a file, 8,192 B for Grep, and 12,288 B
 otherwise. slim never windows MCP results.
 
