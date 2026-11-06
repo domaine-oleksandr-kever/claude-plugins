@@ -6698,6 +6698,15 @@ for p in scripts/shopify-admin-gql.sh scripts/theme-json.sh references/metafield
   assert_contains "DHfe7-store-$p" "$(dh_text fe store-access)" "<fe root>/$p"
   if [ -e "$ROOT/plugins/fe/$p" ]; then ok; else bad "DHfe7-exists-$p" "plugins/fe/$p named by store-access is missing"; fi
 done
+# the measure-before-cause sentence: both readings, the live settings file, the hypothesis label, one sentence
+for n in "computed styles" "section's settings" "config/settings_data.json" "labelled a hypothesis"; do
+  assert_contains "DHfe7-cause-$n" "$(dh_text fe store-access)" "$n"
+done
+assert_eq DHfe7-cause-one-sentence "$(dh_text fe store-access | awk '/^A cause you name/,/^$/' | tr '\n' ' ' | grep -o '\. ' | wc -l | tr -d ' ')" 1
+# the ask rule rides the series: checkpoints and outward steps only, no one-answer question, links in a checked reply
+for n in "only at a ✋ checkpoint" "a Jira write, a store data mutation" "two genuinely different options" "one reasonable answer is never asked" "the storefront URL, the admin" "\`file:line\`"; do
+  assert_contains "DHfe7-ask-$n" "$(dh_text fe progress-series)" "$n"
+done
 
 # DHfe8: the preview default — decided once at SessionStart, toml checkouts only: a set env value wins (even over
 # the global file), else ~/.config/domaine/env; the project .claude/domaine.env is never read.

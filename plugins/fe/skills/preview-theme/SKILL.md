@@ -81,22 +81,27 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    prints the full call shape from the script itself.) **The section is on that store?** For
    each section type the branch changes, `<fe root>/scripts/theme-json.sh where-used <type>`
    with the `--store` this run uses (the live theme's templates and section groups). `count=0`
-   → warn the developer before step 3: the preview would show nothing to review on this store.
+   → ask the developer before step 4 — create anyway, or the store that has it: the preview
+   would show nothing to review on this store.
    A block type: `theme-json.sh get --theme <live id> --file templates/<name>.json
    --strip-comments --out <tmp>/<name>.json` and `jq` it for `"type": "<type>"`.
 2. **Decide the name.**
    - If `theme_name` was given, use it verbatim.
-   - Else if `jira_keys` were given, derive it by swapping the `[DEV]`/role prefix of
-     `dev_theme_name` for the key(s): one key → `[ELC-126] Kever | Domaine`; several →
-     one bracket, prefix once, numbers slash-separated → `[ELC-299/307/309] Kever | Domaine`.
+   - Else if `jira_keys` were given (or the branch or task workspace carries the key), derive
+     it by swapping the `[DEV]`/role prefix of `dev_theme_name` for the key(s): one key →
+     `[ELC-126] Kever | Domaine`; several → one bracket, prefix once, numbers slash-separated →
+     `[ELC-299/307/309] Kever | Domaine`.
    - Else **ask** the developer for the name (or the ticket key(s) to derive it).
-3. **Confirm before mutating.** This builds the repo and creates a real theme on the
-   store. Show the final name and `[ create / reuse existing / cancel ]`. Proceed only on
-   explicit confirmation.
-4. **Create.** Run `create-preview-theme.sh create --name "<name>"` (add `--reuse` to
-   push into an existing same-named theme instead of making a new one). The repo has
-   `multi-brand/brands/` → add `--brand <b>`. b is the directory there that matches the
-   `store=` from step 1 (e.g. `mac` for a MAC store), never a ticket's short code; unclear →
+3. **Say it, don't ask it.** An unpublished preview of this branch is reversible: say in one
+   line what runs (name, store, `--reuse`) and go on — the developer can still stop it. The
+   only asks are step 1's `count=0`, step 2's underivable name, step 4's unclear brand, and a
+   same-named theme no workspace records (`<fe root>/references/session-theme.md` step 2 →
+   Same-named theme first, checked before step 4).
+4. **Create.** Run `create-preview-theme.sh create --name "<name>" --reuse` (`--reuse` pushes
+   into an existing same-named theme — the key and role name scope it to this ticket — instead
+   of stacking a second one; drop it only when the developer asks for a separate theme).
+   The repo has `multi-brand/brands/` → add `--brand <b>`. b is the directory there that
+   matches the `store=` from step 1 (e.g. `mac` for a MAC store), never a ticket's short code; unclear →
    ask. Without it the script refuses to build (`error=brand_required`). The script runs
    `npm run build`, pushes the built code (settings ignored), then overlays the dev
    theme's settings — pass `--no-build` if the developer already built, or
@@ -131,8 +136,12 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
 
 1. **Identify the theme.** Need the target's numeric `theme_id` (see Route the mode for
    where to find it). Do not guess.
-2. **Confirm before mutating.** This rebuilds and overwrites the theme's **code**
-   (settings are preserved). Show the target id and `[ update / cancel ]`.
+2. **Ask only for a theme that may not be this stream's.** This rebuilds and overwrites the
+   theme's **code** (settings are preserved). The id is the workspace's `session-theme:` line
+   (under `<fe root>/references/session-theme.md` step 1's provenance rule) or one the developer
+   handed over for this refresh → say in one line which id gets the branch's code and go on.
+   Any other source (a PR preview table, an id no workspace line records) → show the
+   target id and `[ update / cancel ]`: it may be someone else's preview.
 3. **Refresh.** Run `create-preview-theme.sh refresh --theme <id>` (add `--no-build` /
    `--build-script <name>` as above; with no `package.json` the build is skipped the same
    way; `--brand <b>` when the theme's `session-theme:` line ends in `brand=<b>`). Any `error=` line → report it plainly and follow its entry in the errors reference;

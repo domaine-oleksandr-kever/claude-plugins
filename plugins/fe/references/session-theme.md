@@ -1,8 +1,8 @@
 # Session theme — one preview theme per work stream
 
 Single home of the session-theme flow. `/fe:ship` (Step 0) and `/fe:preview-theme` in a new
-worktree both **offer** it and must offer it identically; `/fe:preview-theme`, the pipeline's qa
-phase, `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix`, `/fe:create-pull-request`, and aftercare all **consume** it. Read this file when the offer actually has to run — the
+worktree both **run** it and must run it identically; `/fe:preview-theme`, the pipeline's qa
+phase, `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix`, `/fe:create-pull-request`, and aftercare all **consume** it. Read this file when the gate actually has to run — the
 silent-reuse path needs nothing from here.
 
 ## Why
@@ -36,14 +36,22 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
    config: the skills may not read it, and `info`'s `dev_theme_id` looks identical whether it
    resolves a session pin or the untouched shared dev theme — treating that as "already
    pinned" would silently adopt the shared theme, the exact collision this exists to prevent.
-2. **Otherwise → one question to the developer (`AskUserQuestion`), never a
-   block**, with the resolved commands (`<fe root>` spelled out as its absolute path) inside
-   the question text so the developer sees what will run:
+2. **Otherwise → create one now, no question, never a block** — an unpublished preview of
+   this branch is reversible. Say so in one line with the resolved command (`<fe root>` spelled
+   out as its absolute path) so the developer sees what runs and can still stop it:
    - **Create one now** →
      `<fe root>/scripts/create-preview-theme.sh create --name "<name>" --reuse --pin-toml`
-   - **Use an existing theme** → the developer supplies the numeric id →
-     `<fe root>/scripts/create-preview-theme.sh pin --theme <id>` — pin-only: it
+   - **Use an existing theme** — only when the developer named one for this stream → its
+     numeric id → `<fe root>/scripts/create-preview-theme.sh pin --theme <id>` — pin-only: it
      validates the id against the store and refuses the live theme, and it pushes nothing.
+
+   Ask (`AskUserQuestion`) only when the work-id carries no key to derive `<name>` from.
+
+   **Same-named theme first.** Before an unasked `create --reuse`, list the store's themes
+   (`<fe root>/scripts/theme-json.sh themes --role unpublished`, with the run's `--store`): a
+   theme already named `<name>` that no workspace `session-theme:` line records may carry content
+   a reviewer configured, and `--reuse` overlays the dev theme's settings onto it → ask instead:
+   `refresh --theme <its id>` (keeps its settings), `--reuse`, or cancel.
 
    `<name>` is **the existing derivation, not a free-text description** — swap `info`'s
    `dev_theme_name` role prefix for the work-id key: `[DEV] Kever | Domaine` →

@@ -29,7 +29,9 @@ its brief says otherwise.
    `theme-customizer-state.md`, and — **on a `foundation` profile only** —
    `section-css-variables-pattern.md`, `eslint-no-restricted-syntax.md` (both describe
    Foundation's Tailwind + `core-*` wiring; off `foundation` they do not apply).
-   In-browser validation vs design + AC (Chrome DevTools MCP), data/customizer state walks
+   In-browser validation vs design + AC (Chrome DevTools MCP) — a diff that touches markup, CSS or
+   theme JSON adds the responsive sweep (`<base root>/references/responsive-sweep.md`; its table or
+   `sweep: not run — <reason>` in the report, each other store using the section `not checked`), data/customizer state walks
    via the runners, `git add` every new file, test
    paths / gids / `ceiling:` entries for intentional simplifications → `notes.md`, and a
    `ta-divergence: <what> — <why>` line for every departure from the TA (never a TA field write).
@@ -64,10 +66,12 @@ its brief says otherwise.
    `error=dev_theme_not_found` (on a create: the toml's settings source was deleted) →
    ESCALATE; the pipeline never passes `--allow-unverified` or `--allow-dev-theme`, and never
    creates a replacement theme on its own. **No `--pin-toml` here** — this phase is past the ✋
-   and rewriting the developer's `shopify.theme.toml` unasked (possibly the choice they
-   declined at Step 0) is not an autonomous phase's call; the pin is re-asserted by the Step 0
-   gate on the next entry. Never simulate a
-   logged-in state on the dev server; evidence per row; append the pass/fail report + findings with exact
+   and rewriting the developer's `shopify.theme.toml` unasked is the Step 0 gate's call, not an
+   autonomous phase's; the pin is re-asserted by the Step 0 gate on the next entry. Never simulate a
+   logged-in state on the dev server; evidence per row; a diff that touches markup, CSS or theme
+   JSON → the responsive sweep on each surface (`<base root>/references/responsive-sweep.md`), its
+   table or `sweep: not run — <reason>` in the report, each other store using the section
+   `not checked`; append the pass/fail report + findings with exact
    repro values to `qa.md`, blocking vs non-blocking. Merge the `base:bug-hunter` findings
    into the same triage — every one **dispositioned** (fix / justify → `ceiling:` entry +
    PR body / ESCALATE), never dropped.
@@ -76,7 +80,9 @@ its brief says otherwise.
    read when it can't be reproduced live); **cap 2 cycles**, then ESCALATE with the report.
    Every fix-agent brief says `round N of 2`, and round 2 adds `this is your LAST`. A blocker an
    earlier round already targeted is named in the brief as the SAME blocker: the last diagnosis
-   was wrong — re-diagnose before re-editing; its ESCALATE lists what was ruled out.
+   was wrong — re-diagnose before re-editing, a cause only from
+   `<fe root>/skills/develop-feature-or-fix/SKILL.md` Phase 1 step 3's two readings; its ESCALATE
+   lists what was ruled out.
 3. **finalize** — review + commit in one pass. Review per
    `<base root>/references/review-flow.md` with `hygiene` emphasis
    (`base:change-reviewer` subagent(s), each briefed with the run's

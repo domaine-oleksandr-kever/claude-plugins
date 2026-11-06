@@ -408,6 +408,14 @@ for needle in 'HARD RULE — theme or ask, never skip' '**(a)** create a preview
   if grep -qF -- "$needle" "$CPR"; then ok; else bad fe-cpr-theme-or-ask "create-pull-request/SKILL.md lacks: $needle"; fi
 done
 if grep -qF 'their rows are omitted from the body' "$CPR"; then bad fe-cpr-theme-silent-drop "create-pull-request/SKILL.md still drops the theme rows silently"; else ok; fi
+# one-option gates stay gone: a derivable preview is created and said, the asks name their trigger
+FE="$ROOT/plugins/fe"
+for pair in "$CPR|and say so in one line — no question" "$FE/skills/preview-theme/SKILL.md|Say it, don't ask it" "$FE/skills/preview-theme/SKILL.md|Ask only for a theme that may not be this stream's" "$FE/references/session-theme.md|create one now, no question" "$FE/references/session-theme.md|**Same-named theme first.**" "$FE/skills/create-pull-request/reference/preview-theme.md|Same-named theme first runs before the create"; do
+  if grep -qF -- "${pair#*|}" "${pair%%|*}"; then ok; else bad fe-no-one-option-gate "${pair%%|*} lacks: ${pair#*|}"; fi
+done
+for pair in "$FE/skills/preview-theme/SKILL.md|reuse existing / cancel" "$FE/skills/qa-feature-or-fix/SKILL.md|ask which source" "$CPR|confirm against Git Flow" "$FE/skills/create-pull-request/reference/preview-theme.md|create the preview theme now?"; do
+  if grep -qF -- "${pair#*|}" "${pair%%|*}"; then bad fe-one-option-gate-back "${pair%%|*} still has: ${pair#*|}"; else ok; fi
+done
 if [ -f "$ROOT/plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js" ]; then ok
 else bad fe-fbc-template "plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js missing"; fi
 
