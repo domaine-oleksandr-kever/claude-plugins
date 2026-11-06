@@ -6,17 +6,21 @@
 // Element (a chrome-devtools args uid) measures the current width (async); { table: true, maxRows, maxBytes } → text.
 function responsiveSweep(opts) {
   const o = opts && opts.nodeType === 1 ? { root: opts } : opts || {}
+  // An <input name="id"> clobbers a form's .id property; the attribute is the real id.
+  const id = e => e.getAttribute('id')
   const seg = e => {
-    if (e.id) return '#' + e.id
+    if (id(e)) return '#' + id(e)
     const c = typeof e.className === 'string' ? e.className.trim().split(/\s+/).find(k => /^[A-Za-z_][\w-]*$/.test(k)) : ''
     return e.tagName.toLowerCase() + (c ? '.' + c : '')
   }
   const name = el => {
-    if (el.id) return seg(el)
+    const host = el.getRootNode().host
+    if (host) return name(host) + ' >> ' + seg(el)
+    if (id(el)) return seg(el)
     const p = el.parentElement
     let a = p
-    while (a && !a.id) a = a.parentElement
-    return (a && a !== p ? '#' + a.id + ' ' : '') + (p && p !== document.body ? seg(p) + ' > ' : '') + seg(el)
+    while (a && !id(a)) a = a.parentElement
+    return (a && a !== p ? '#' + id(a) + ' ' : '') + (p && p !== document.body ? seg(p) + ' > ' : '') + seg(el)
   }
 
   if (o.widths) {
@@ -34,18 +38,22 @@ function responsiveSweep(opts) {
     const t = globalThis.__responsiveSweep || { seen: {} }
     const widths = Object.keys(t.seen).map(Number).sort((a, b) => a - b)
     if (!widths.length) return 'responsive sweep: no width measured'
+    // Repeated cards differ only in a product or variant id: one row for them all, a lone one keeps its real selector.
+    const fold = sel => sel.replace(/\d{4,}/g, '…')
     const rows = new Map()
     widths.forEach((w, i) => {
       const here = new Map()
       for (const f of t.seen[w]) {
-        const key = f.sel + '|' + f.kind + '|' + (f.kind === 'lines' ? f.px : f.label)
-        const h = here.get(key) || { ...f, n: 0 }
+        const key = fold(f.sel) + '|' + f.kind + '|' + (f.kind === 'lines' ? f.px : f.label)
+        const h = here.get(key) || { ...f, n: 0, sels: new Set() }
         h.n++
+        h.sels.add(f.sel)
         h.px = Math.max(h.px, f.px)
         here.set(key, h)
       }
       for (const [key, h] of here) {
-        const r = rows.get(key) || { ...h, at: [], n: 0, px: 0 }
+        const r = rows.get(key) || { ...h, at: [], n: 0, px: 0, sels: new Set() }
+        for (const x of h.sels) r.sels.add(x)
         r.at.push(i)
         r.n = Math.max(r.n, h.n)
         r.px = Math.max(r.px, h.px)
@@ -70,7 +78,7 @@ function responsiveSweep(opts) {
       }
       return out.map(([a, b]) => (a === b ? widths[a] : widths[a] + '-' + widths[b])).join(', ')
     }
-    const list = [...rows.values()].sort((a, b) =>
+    const list = [...rows.values()].map(r => (r.sels.size > 1 ? { ...r, sel: fold(r.sel) } : r)).sort((a, b) =>
       ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.sel.localeCompare(b.sel) || a.at[0] - b.at[0])
     const bytes = s => encodeURIComponent(s).replace(/%[0-9A-F]{2}/g, 'x').length
     const maxRows = o.maxRows || 30, maxBytes = o.maxBytes || 3000
@@ -110,7 +118,10 @@ function responsiveSweep(opts) {
     const short = e => e.matches(SHORT) || (e.tagName === 'LI' && !!e.closest('nav'))
     const ownText = e => [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())
     const clips = v => v === 'hidden' || v === 'clip'
-    for (const el of [root, ...root.querySelectorAll('*')]) {
+    const all = [], walk = e => { all.push(e); if (e.shadowRoot) for (const d of e.shadowRoot.querySelectorAll('*')) walk(d) }
+    for (const e of [root, ...root.querySelectorAll('*')]) walk(e)
+    const up = e => e.parentElement || e.getRootNode().host
+    for (const el of all) {
       if (el === document.body || !el.getClientRects().length) continue
       const s = getComputedStyle(el)
       const r = el.getBoundingClientRect()
@@ -118,7 +129,7 @@ function responsiveSweep(opts) {
       if (s.visibility === 'hidden' || (r.width <= 1 && r.height <= 1)) continue
       if (((r.left < -1 && r.right > 0) || (r.left < vw && r.right > vw + 1)) && !off.some(x => x.contains(el))) {
         let cut = false
-        for (let a = el.parentElement; a && a !== document.body && !cut; a = a.parentElement) cut = getComputedStyle(a).overflowX !== 'visible'
+        for (let a = up(el); a && a !== document.body && !cut; a = up(a)) cut = getComputedStyle(a).overflowX !== 'visible'
         if (!cut) { off.push(el); add(el, 'offscreen', Math.max(-r.left, r.right - vw)) }
       }
       if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1) {

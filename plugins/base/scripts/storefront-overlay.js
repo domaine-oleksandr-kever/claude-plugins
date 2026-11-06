@@ -8,14 +8,16 @@ function storefrontOverlay(opts) {
   const o = opts && opts.nodeType === 1 ? { probe: opts } : opts || {}
   const ident = v => /^[A-Za-z_][\w-]*$/.test(v)
   const count = s => { try { return document.querySelectorAll(s).length } catch (err) { return 0 } }
+  // An <input name="id"> clobbers a form's .id property; the attribute is the real id.
+  const id = el => el.getAttribute('id') || ''
   // A selector naming this element alone, so passing it back in `hide` removes nothing else.
   const name = el => {
     const cls = typeof el.className === 'string' ? el.className.trim().split(/\s+/).filter(ident).slice(0, 2) : []
-    const s = el.tagName.toLowerCase() + (ident(el.id) ? '#' + el.id : '') + cls.map(c => '.' + c).join('')
+    const s = el.tagName.toLowerCase() + (ident(id(el)) ? '#' + id(el) : '') + cls.map(c => '.' + c).join('')
     if (count(s) === 1) return s
     const path = []
     for (let a = el; a.parentElement; a = a.parentElement) {
-      if (a !== el && ident(a.id) && count('#' + a.id) === 1) { path.unshift('#' + a.id); break }
+      if (a !== el && ident(id(a)) && count('#' + id(a)) === 1) { path.unshift('#' + id(a)); break }
       if (a === document.body) { path.unshift('body'); break }
       path.unshift((a === el ? s : a.tagName.toLowerCase()) + `:nth-child(${[...a.parentElement.children].indexOf(a) + 1})`)
     }
@@ -38,14 +40,18 @@ function storefrontOverlay(opts) {
     if (n) removed.push(n > 1 ? `${sel} ×${n}` : sel)
   }
   const vw = innerWidth, vh = innerHeight
+  const covers = el => {
+    if (!shown(el)) return false
+    const s = style(el), r = el.getBoundingClientRect()
+    return el.matches('dialog[open], [aria-modal="true"]') || (s.position === 'fixed' && s.pointerEvents !== 'none' &&
+      r.left <= vw * 0.1 && r.left + r.width >= vw * 0.9 && r.top <= vh * 0.1 && r.top + r.height >= vh * 0.9)
+  }
+  // A custom element's overlay can live in its open shadow root while the host itself is a 0x0 inline box.
+  const inShadow = root => [...root.querySelectorAll('*')].some(d => covers(d) || (d.shadowRoot && inShadow(d.shadowRoot)))
   const covering = []
   for (const el of document.querySelectorAll('body *')) {
-    if (covering.some(c => c.contains(el)) || !shown(el)) continue
-    const s = style(el), r = el.getBoundingClientRect()
-    const full = s.position === 'fixed' && s.pointerEvents !== 'none' &&
-      r.left <= vw * 0.1 && r.left + r.width >= vw * 0.9 && r.top <= vh * 0.1 && r.top + r.height >= vh * 0.9
-    const modal = el.matches('dialog[open], [aria-modal="true"]')
-    if (full || modal) covering.push(el)
+    if (covering.some(c => c.contains(el))) continue
+    if (covers(el) || (el.shadowRoot && inShadow(el.shadowRoot))) covering.push(el)
   }
   const report = { removed, kept, covering: covering.map(name) }
   if (!o.probe) return report

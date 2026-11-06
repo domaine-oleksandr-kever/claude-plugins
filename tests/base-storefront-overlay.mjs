@@ -38,6 +38,7 @@ class El {
   matches(sel) { return sel.split(',').some((s) => matchChain(this, s.trim())); }
   closest(sel) { for (let a = this; a; a = a.parentElement) if (a.matches(sel)) return a; return null; }
   querySelector(sel) { return this.descendants().find((d) => d.matches(sel)) || null; }
+  attachShadow(children) { this.shadowRoot = { host: this, querySelectorAll: () => children.flatMap((c) => [c, ...c.descendants()]) }; return this; }
   remove() { const p = this.parentElement; if (p) p.children = p.children.filter((c) => c !== this); this.parentElement = null; }
 }
 // A compound selector, or a chain of them joined by the child combinator `>`.
@@ -49,12 +50,12 @@ function matchChain(el, s) {
 }
 const PART = /#[\w-]+|\.[\w-]+|\[[^\]]+\]|:disabled|:nth-child\(\d+\)/g;
 function matchOne(el, s) {
-  const m = /^([a-z]*)((?:#[\w-]+|\.[\w-]+|\[[^\]]+\]|:disabled|:nth-child\(\d+\))*)$/i.exec(s);
+  const m = /^([a-z][\w-]*|)((?:#[\w-]+|\.[\w-]+|\[[^\]]+\]|:disabled|:nth-child\(\d+\))*)$/i.exec(s);
   if (!m || !s) throw new SyntaxError(`'${s}' is not a valid selector`);
   if (m[1] && el.tagName !== m[1].toUpperCase()) return false;
   for (const part of m[2].match(PART) || []) {
     if (part === ':disabled') { if (!('disabled' in el.attrs)) return false; continue; }
-    if (part[0] === '#') { if (el.id !== part.slice(1)) return false; continue; }
+    if (part[0] === '#') { if (el.getAttribute('id') !== part.slice(1)) return false; continue; }
     if (part[0] === '.') { if (!el.className.split(/\s+/).includes(part.slice(1))) return false; continue; }
     if (part[0] === ':') { const p = el.parentElement; if (!p || p.children.indexOf(el) + 1 !== Number(part.slice(11, -1))) return false; continue; }
     const a = /^\[([\w-]+)(?:(\*?=)"?([^"]*)"?)?\]$/.exec(part);
@@ -199,6 +200,42 @@ const asFunction = (ctx) => vm.runInNewContext(`(${SRC}\n)`, ctx);
     { target: '#next-slide-btn', found: true, disabled: false, hidden: false, offscreen: true });
   const bad = f({ hide: ['#CartDrawer'], probe: '[[' });
   check('an invalid probe selector is reported next to the removals', [bad.removed, bad.probe], [['#CartDrawer'], { target: '[[', found: false, error: 'invalid selector' }]);
+}
+
+// --- a form's .id clobbered by <input name="id"> ------------------------------------------------------------
+{
+  const input = new El('input', { name: 'id' });
+  const f1 = new El('form', { id: 'product-form-1', class: 'product-form' }, {}, [0, 0, 300, 100], [input]);
+  const f2 = new El('form', { class: 'product-form' }, {}, [0, 200, 300, 100], [new El('input', { name: 'id' })]);
+  f1.id = input; f2.id = f2.children[0];
+  const body = new El('body', {}, {}, FULL, [f1, f2]);
+  const f = asScript(page(body));
+  check('a clobbered .id: the id attribute names the form', f(f1).probe.target, 'form#product-form-1.product-form');
+  check('a clobbered .id with no id attribute: named by its path', f(f2).probe.target, 'body > form.product-form:nth-child(2)');
+}
+
+// --- an overlay inside an open shadow root ------------------------------------------------------------------
+{
+  const mk = (shadowStyle) => {
+    const host = new El('extended-dialog', { id: 'region-selector-modal', open: '', class: 'region-selector-dialog' }, { display: 'inline' }, [0, 0, 0, 0]);
+    host.attachShadow([new El('div', { class: 'backdrop' }, { ...FIXED, ...shadowStyle }, FULL, [new El('div', {}, {}, [300, 200, 400, 300])])]);
+    const icon = new El('svg-icon', {}, { display: 'inline' }, [0, 0, 20, 20]).attachShadow([new El('svg', {}, {}, [0, 0, 20, 20])]);
+    return { host, body: new El('body', {}, {}, FULL, [new El('header', {}, {}, [0, 0, VW, 80], [icon]), host]) };
+  };
+  const { host, body } = mk({});
+  const ctx = page(body);
+  const r = asScript(ctx)();
+  check('a host whose shadow root holds a full-viewport fixed layer is covering, by the host name', r.covering, ['extended-dialog#region-selector-modal.region-selector-dialog']);
+  const r2 = asScript(ctx)({ hide: r.covering });
+  check('hiding by that name removes the host', [r2.removed, host.parentElement === null, r2.covering], [r.covering, true, []]);
+  check('hidden shadow content: the host is not covering', asScript(page(mk({ display: 'none' }).body))().covering, []);
+  check('transparent shadow content: the host is not covering', asScript(page(mk({ opacity: '0' }).body))().covering, []);
+  const inner = new El('drawer-panel', {}, { display: 'inline' }, [0, 0, 0, 0]).attachShadow([new El('dialog', { open: '' }, {}, [600, 0, 400, VH])]);
+  const outer = new El('cart-root', { id: 'cart' }, { display: 'inline' }, [0, 0, 0, 0]).attachShadow([new El('div', {}, {}, FULL, [inner])]);
+  const wrapped = new El('cart-root', {}, { display: 'inline' }, [0, 0, 0, 0]).attachShadow([new El('div', {}, FIXED, FULL)]);
+  const back = new El('div', { id: 'backdrop' }, FIXED, FULL, [wrapped]);
+  check('nested roots: the outermost light-DOM host, once; a host inside a listed layer is not listed again',
+    asScript(page(new El('body', {}, {}, FULL, [outer, back])))().covering, ['cart-root#cart', 'div#backdrop']);
 }
 
 // --- the storefront-login guard ------------------------------------------------------------------------

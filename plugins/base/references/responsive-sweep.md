@@ -20,8 +20,10 @@ needs it; a copy-only or data-only change reports one line, `sweep: not run — 
   on the page: sideways page scroll (always, whatever the root), an element sticking out of the
   viewport, content spilling out of its box, text cut by a fixed height (`line-clamp` labelled) or at
   the side (`ellipsis` labelled), and a heading, button, link, label or nav item of 40 characters or
-  less on 2+ lines. Each finding names a short selector (`#<id ancestor> <parent> > <tag.class>`).
-- `{ table: true }` folds the stored widths into the table: one row per element and finding, with the
+  less on 2+ lines. Each finding names a short selector (`#<id ancestor> <parent> > <tag.class>`); open shadow roots are
+  walked too, nested ones included, and an element in one is named `<host> >> <tag.class>`.
+- `{ table: true }` folds the stored widths into the table: one row per element and finding (rows that
+  differ only in a long number, a product or variant id, fold into one with `…` and `×N`), with the
   widths where it shows as ranges (`#shopify-section-header nav.menu > a.menu-link ×2 | 2 lines | 1024-1120`).
   A range runs from the first to the last measured width that shows the finding; the break itself
   sits between that width and the next one measured. Capped at 30 rows / 3000 bytes; the last line
@@ -32,7 +34,10 @@ It reads layout only: no click, no fill, no style change.
 - **Playwright MCP** — one `browser_run_code_unsafe` call with inline `code`, on the page already open:
   `async (page) => { await page.addScriptTag({ path: '<base root>/scripts/responsive-sweep.js' }); const v = page.viewportSize() || { width: 1280, height: 800 }; for (const width of await page.evaluate(b => responsiveSweep({ widths: b }), [<breakpoints>])) { await page.setViewportSize({ width, height: v.height }); await page.evaluate(r => responsiveSweep({ root: r }), '<root selector>'); } await page.setViewportSize(v); return await page.evaluate(() => responsiveSweep({ table: true })); }`
 - **chrome-devtools MCP** — no in-call resize, so two calls per width and a shorter list (`step: 160`):
-  1. `evaluate_script` with `sourcePath: '<base root>/scripts/responsive-sweep.js'` and `format: 'script'`
+  1. it reads `sourcePath` only inside the project: once per session copy the snippet into the
+     project's scratch, `mkdir -p .claude/tmp && cp <base root>/scripts/responsive-sweep.js .claude/tmp/`
+     (`.claude/tasks/<work-id>/tmp/` with a task workspace), then `evaluate_script` with `sourcePath` the
+     copy's absolute path (`'<project root>/.claude/tmp/responsive-sweep.js'`) and `format: 'script'`
      (defines the function until the next navigation);
   2. `evaluate_script` `function: "() => responsiveSweep({ widths: [<breakpoints>], step: 160 })"`;
   3. per width: `emulate` with `viewport: '<width>x<height>x1'` (each call replaces every emulation

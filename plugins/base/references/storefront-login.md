@@ -30,8 +30,8 @@
 removes the known consent overlays (`#onetrust-consent-sdk`, `#CybotCookiebotDialog`) and each
 `opts.hide` selector, never an element that holds or sits in the password gate, and returns
 `{ removed, kept, covering }`: `removed` adds `×N` to a selector that removed N elements, and
-`covering` names each visible full-viewport fixed element and open modal still on the page. Every
-name it returns selects that one element. `opts.probe` (a selector) adds `probe`: `found`,
+`covering` names each visible full-viewport fixed element and open modal still on the page, or the
+outermost host whose open shadow root holds one. Every name it returns selects that one element. `opts.probe` (a selector) adds `probe`: `found`,
 `disabled` (also `pointer-events: none`), `hidden`, `offscreen` (also outside a clipping
 ancestor), or `covered` with `by` (the element at the target's centre) and `layer` (its outermost
 fixed ancestor that does not hold the target). It never fills or submits, so base's MCP guard lets
@@ -40,8 +40,10 @@ it run.
 - **Playwright MCP** — one `browser_run_code_unsafe` call with inline `code` (its `filename` takes
   only a file inside the project); leave out `hide` or `probe` you do not need:
   `async (page) => { await page.addScriptTag({ path: '<base root>/scripts/storefront-overlay.js' }); return await page.evaluate(o => storefrontOverlay(o), { hide: ['<selector>'], probe: '<selector>' }); }`
-- **chrome-devtools MCP** — `evaluate_script` with `sourcePath: '<base root>/scripts/storefront-overlay.js'`
-  clears the known overlays; add `args: ['<uid>']` to probe that element too. With `hide` or a probe
+- **chrome-devtools MCP** — it reads `sourcePath` only inside the project, so first copy the snippet
+  into the project's scratch, once per session: `mkdir -p .claude/tmp && cp <base root>/scripts/storefront-overlay.js .claude/tmp/`
+  (`.claude/tasks/<work-id>/tmp/` with a task workspace). Then `evaluate_script` with `sourcePath`
+  the copy's absolute path (`'<project root>/.claude/tmp/storefront-overlay.js'`) clears the known overlays; add `args: ['<uid>']` to probe that element too. With `hide` or a probe
   selector: the same `sourcePath` with `format: 'script'` (defines the function until the next
   navigation), then `function: "() => storefrontOverlay({ hide: ['<selector>'], probe: '<selector>' })"`.
 

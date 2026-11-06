@@ -438,5 +438,13 @@ if grep -qF "<base root>/scripts/responsive-sweep.js" "$BASE/references/responsi
   && grep -qF 'responsiveSweep({ table: true })' "$BASE/references/responsive-sweep.md"; then ok
 else bad base-responsive-sweep-call "references/responsive-sweep.md does not call scripts/responsive-sweep.js's responsiveSweep"; fi
 
+# chrome-devtools reads sourcePath only inside the project: the routes copy the snippet there, never point at <base root>
+for pair in storefront-login:storefront-overlay responsive-sweep:responsive-sweep; do
+  f="$BASE/references/${pair%%:*}.md"
+  if ! grep -qF "sourcePath: '<base root>" "$f" && grep -qF "cp <base root>/scripts/${pair#*:}.js .claude/tmp/" "$f" \
+    && grep -qF "'<project root>/.claude/tmp/${pair#*:}.js'" "$f"; then ok
+  else bad base-devtools-sourcepath-copy "references/${pair%%:*}.md: a chrome-devtools sourcePath points at <base root>, or the copy into the project is not named"; fi
+done
+
 echo "base-refs-lint: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

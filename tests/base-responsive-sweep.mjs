@@ -36,6 +36,9 @@ class El {
     this.clientWidth = o.cw ?? r.width; this.scrollWidth = o.sw ?? this.clientWidth;
     this.clientHeight = o.ch ?? r.height; this.scrollHeight = o.sh ?? this.clientHeight;
   }
+  getAttribute(n) { return n === 'id' ? this.o.id ?? null : null; }
+  getRootNode() { let a = this; while (a.parentElement) a = a.parentElement; return a.rootNode || {}; }
+  attachShadow(children) { const r = { host: this, querySelectorAll: () => children.flatMap((c) => [c, ...c.descendants()]) }; for (const c of children) c.rootNode = r; this.shadowRoot = r; return this; }
   get textContent() { return this.childNodes.map((n) => n.textContent).join(''); }
   getBoundingClientRect() { return box(this.o.rect || [0, 0, 100, 20]); }
   getClientRects() { return this.o.hidden ? [] : [this.getBoundingClientRect()]; }
@@ -51,7 +54,7 @@ class El {
 }
 function matchOne(el, s) {
   if (s === '*') return true;
-  if (s[0] === '#') return el.id === s.slice(1);
+  if (s[0] === '#') return el.getAttribute('id') === s.slice(1);
   const role = /^\[role=([\w-]+)\]$/.exec(s);
   if (role) return el.o.role === role[1];
   if (!/^[a-z][a-z0-9]*$/.test(s)) throw new SyntaxError(`stub cannot match '${s}'`);
@@ -159,6 +162,31 @@ const findings = (ctx) => ctx.__responsiveSweep.seen[ctx.innerWidth];
   check('an Element argument (a chrome-devtools uid) is the root', [byUid.findings, ctx.__responsiveSweep.root], [4, '#nav']);
 }
 
+// --- a form's .id clobbered by <input name="id">, open shadow roots ---------------------------------------------
+{
+  const f1 = new El('form', { id: 'product-form', rect: [0, 0, 300, 100] }, [new El('input', {}), new El('div', { class: 'grid', cw: 300, sw: 322 })]);
+  const f2 = new El('form', { rect: [0, 200, 300, 100] }, [new El('input', {}), new El('div', { class: 'grid', cw: 300, sw: 330 })]);
+  f1.id = f1.children[0]; f2.id = f2.children[0];
+  const label = new El('a', { class: 'label', text: 'Add to cart', rect: [0, 400, 80, 40], lines: [[0, 400, 80, 20], [0, 420, 40, 20]] });
+  const clip = new El('div', { class: 'copy', style: { overflowY: 'hidden' }, rect: [0, 500, 300, 60], ch: 60, sh: 90, text: 'Long copy' });
+  const peek = new El('div', { class: 'peek', rect: [900, 600, 300, 50] });
+  const inner = new El('price-tag', { rect: [0, 700, 100, 20] }).attachShadow([new El('button', { class: 'more', text: 'More', lines: [[0, 700, 40, 20], [0, 720, 40, 20]] })]);
+  const card = new El('product-card', { id: 'pc', rect: [0, 400, 300, 200] }).attachShadow([new El('div', { class: 'body' }, [label, clip, inner])]);
+  const slider = new El('slider-el', { class: 'slider', style: { overflowX: 'hidden' }, rect: [0, 600, 1000, 50] }).attachShadow([peek]);
+  const ctx = context(page(new El('body', {}, [new El('main', { id: 'main' }, [f1, f2, card, slider])])));
+  const run = asScript(ctx);
+  run({ widths: [] });
+  await run({ root: '#main' });
+  check('a clobbered .id: the id attribute names the form, else the path', findings(ctx).filter((f) => f.kind === 'spill').map((f) => f.sel),
+    ['#product-form > div.grid', '#main form > div.grid']);
+  check('open shadow roots are measured and named host >> element, nested too; the overflow cut crosses the boundary',
+    findings(ctx).filter((f) => f.kind !== 'spill').map((f) => [f.sel, f.kind, f.px]), [
+      ['#pc >> a.label', 'lines', 2],
+      ['#pc >> div.copy', 'clip', 30],
+      ['#pc >> price-tag >> button.more', 'lines', 2],
+    ]);
+}
+
 // --- a sweep folded into the table ---------------------------------------------------------------------------
 async function sweep(layout, widths, opts = {}) {
   const ctx = context(page(new El('body')));
@@ -191,6 +219,22 @@ async function sweep(layout, widths, opts = {}) {
   check('line counts are separate rows; a gap splits a range', run({ table: true }).split('\n').slice(2), [
     '#main > h3.title | 3 lines | 320-360',
     '#main > h3.title | 2 lines | 400-480, 1840-1920',
+  ]);
+}
+{
+  // Repeated product cards differ only in their ids; a lone numeric id and a non-digit difference stay as they are.
+  const ids = ['9584789618944-9584789618944', '9584789782784-9584789782784', '9584822288640-9584822288640'];
+  const layout = (w) => new El('body', {}, [new El('main', { id: 'main' }, [
+    ...ids.map((id) => new El('form', { id: `product-card-form-${id}` }, [new El('div', { class: 'grid', cw: 300, sw: w < 400 ? 322 : 300 })])),
+    new El('div', { id: 'shopify-section-template--1234567890__main' }, [new El('p', { class: 'note', style: { overflowY: 'hidden' }, ch: 20, sh: w < 400 ? 40 : 20, text: 'Note' })]),
+    ...['hero', 'footer'].map((k) => new El('div', { id: `section-${k}-12` }, [new El('h3', { text: 'Title', lines: [[0, 0, 9, 20], [0, 20, 9, 20]] })])),
+  ])]);
+  const { run } = await sweep(layout, [], { step: 800 });
+  check('ids differing only in long numbers fold into one row; a lone one and a non-digit difference do not', run({ table: true }).split('\n').slice(2), [
+    '#product-card-form-…-… > div.grid ×3 | content spills out of its box +22px | 320',
+    '#shopify-section-template--1234567890__main > p.note | text cut by a fixed height +20px | 320',
+    '#section-footer-12 > h3 | 2 lines | 320-1920',
+    '#section-hero-12 > h3 | 2 lines | 320-1920',
   ]);
 }
 {
