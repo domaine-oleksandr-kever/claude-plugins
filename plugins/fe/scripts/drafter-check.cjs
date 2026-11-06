@@ -264,8 +264,11 @@ function checkJira(path) {
   if (brief.length > 6) fails.push('brief longer than 6 lines');
   if (brief.some((l) => !/^\s*[-*]\s+\S/.test(l))) fails.push('brief line is not a bullet');
   if (lines.some((l) => /^#{1,6} /.test(l))) fails.push('heading in the comment');
-  const label = (l) => /^\s*(?:[-*]\s+)?(?:\*\*[^*]+\*\*|[A-Z][\w /]*:)\s*(?:\*\*)?\s*:?\s*$/.test(l);
-  const opensLabel = (l) => label(l) || /^\s*(?:(?:[-*]\s+)?\*\*[^*]+\*\*|[A-Z][\w /]*:)/.test(l);
+  // a bullet that is one bold span of four or more words ending in . ! ? or … (a closing bracket or
+  // quote may follow), or ending in a CJK stop, is a sentence — content, never a label
+  const sentence = (l) => /^\s*(?:[-*]\s+)?\*\*(?:(?=\s*[^\s*]+(?:\s+[^\s*]+){3})[^*]*[.!?…]|[^*]*[。！？])[)\]"'”’]*\*\*\s*$/.test(l);
+  const label = (l) => !sentence(l) && /^\s*(?:[-*]\s+)?(?:\*\*[^*]+\*\*|[A-Z][\w /]*:)\s*(?:\*\*)?\s*:?\s*$/.test(l);
+  const opensLabel = (l) => !sentence(l) && (label(l) || /^\s*(?:(?:[-*]\s+)?\*\*[^*]+\*\*|[A-Z][\w /]*:)/.test(l));
   // a next line that opens no bold label is its content (`- Desktop: …` too)
   if (brief.some((l, i) => label(l) && (i + 1 >= brief.length || opensLabel(brief[i + 1])))) fails.push('label with no content');
   if (lines.some((l) => /^\s*(?:[-*>]\s*)?(?:(?:\*\*[^*]+\*\*|[A-Z][\w /]*:)\s*:?\s*)?[_*]*\(?(none|n\/a)\)?\.?[_*]*\s*$/i.test(l))) fails.push('None/N/A placeholder');

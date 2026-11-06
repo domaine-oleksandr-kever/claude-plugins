@@ -166,7 +166,7 @@ hand, then `refresh --theme <id>`.
 one — which is what a **deleted** preview theme looks like. Not an outage, so no flag lifts it —
 a recorded `session-theme:` id and `--allow-unverified` both answer "the store did not answer",
 not "the theme is gone". Confirm the id (a preview URL's `?preview_theme_id=…`), or make a fresh
-preview with `create --name "<name>" --reuse` and hand the reviewer the new link (add
+preview with `create --name "<name>" --reuse [--brand <b>]` and hand the reviewer the new link (add
 `--pin-toml` only when the lost id was the one pinned in `shopify.theme.toml`). Or the id lives
 on **another store** (a brand with a store per region): a preview URL whose `*.myshopify.com`
 host differs from the line's `store=` → re-run with `--store <that handle>`; with a bare id,
@@ -182,7 +182,7 @@ pin target all belong to the toml's store:
 - **`error=overlay_store_mismatch`** (`create`, `--reuse` too) → nothing was built or pushed: the
   settings source is out of reach and a theme without settings has no templates. Refresh an
   existing preview theme on that store instead, copy a theme that lives there
-  (`create --name <NAME> --duplicate-of <theme> --store <store>`, see **A copy of another
+  (`create --name <NAME> --duplicate-of <theme> [--brand <b>] --store <store>`, see **A copy of another
   theme**), or select the toml block that names it (`SHOPIFY_FLAG_ENVIRONMENT=<name>`).
 - **`error=pin_store_mismatch`** (`pin`, `refresh --pin-toml`, `create --duplicate-of --pin-toml`) → nothing was written; drop the
   pin (record the id in `notes.md` only) or `--env` the block that names that store.
@@ -258,9 +258,16 @@ kept…`): it still carries the source theme's code — re-push with `refresh --
   `theme list` does not carry that id or name (check the store — a brand has a store per region),
   or the listing gave no readable answer (the line says so; an auth `hint=` may follow) → re-run
   when the store answers. A name two themes share is `error=ambiguous_name` → pass the id.
-- **`error=duplicate_failed`** → the build ran, `shopify theme duplicate` failed (`log=` + its last
-  25 lines; auth `hint=` lines as for a push) or answered without a theme id — then a theme of that
-  name may exist: check `shopify theme list --store <store>` before re-running. Nothing was pushed.
+- **`error=duplicate_failed`** → the build ran and nothing was pushed. Four shapes:
+  `shopify theme duplicate` failed (`log=` + its last 25 lines; auth `hint=` lines as for a push);
+  it **refused** the copy — the line quotes the CLI's message with `errors=` and `request_id=` when
+  the CLI gave one and says no theme was created (`Maximum number of themes reached` → the store is
+  at its theme cap: tell the developer which themes could go, never delete one yourself;
+  `errors=none` → retry once, then report the `request_id=` if printed, except a message saying to use `shopify theme push` — the source
+  is a development theme: pick an unpublished or live theme as `--duplicate-of` instead); it
+  **answered with the source theme's own id** → report it to the developer, do not retry; or it answered something else without a theme id
+  (`cli_answer=` + `log=`) — then a theme of that name may exist: check
+  `shopify theme list --store <store>` before re-running.
 - **`error=duplicate_timeout theme=<id>`** + `created_theme=<id>` → the copy exists but was not
   listed ready (present and not `processing`) within `FE_CPT_DUPLICATE_TIMEOUT` (300 s); a large
   theme can take longer. Nothing was pushed — a push while it processes is overwritten when the

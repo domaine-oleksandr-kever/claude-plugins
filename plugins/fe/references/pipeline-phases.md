@@ -54,7 +54,7 @@ its brief says otherwise.
    `session-theme: <id>`, refreshed to this branch's code
    (`<fe root>/scripts/create-preview-theme.sh refresh --theme <id>` — settings
    preserved; plus `--brand <b>` when that line ends in `brand=<b>`); no line recorded → build the `[ELC-…]` theme
-   (`<fe root>/scripts/create-preview-theme.sh create --name "<name>" --reuse`)
+   (`<fe root>/scripts/create-preview-theme.sh create --name "<name>" --reuse`; plus `--brand <b>` when `info` prints `brands=` — b is the brand of the store pushed to; unknown → ESCALATE for it (a name from `brands=`), never guessed from the store handle)
    and record it as `session-theme: <id>` + links in `notes.md`, so create
    happens at most once per work stream. Every run's output — `build_dirtied` (never restore
    unasked), an exit-0 run that is not reviewable (never book its 404s as branch defects), the
@@ -167,8 +167,8 @@ its brief says otherwise.
    workspace `ticket.md` key (`<base root>/references/jira-adf-write.md`).
 6. **aftercare** — `gh pr checks --watch`; a failing check → diagnose → fix agent → refresh
    the session theme's code (`<fe root>/scripts/create-preview-theme.sh refresh --theme
-   <the session-theme id from notes.md — under session-theme.md's provenance gate>` — settings
-   untouched, and it is the same theme the PR table links to; `error=refresh_unverifiable` /
+   <the session-theme id from notes.md — under session-theme.md's provenance gate>`, plus
+   `--brand <b>` when that line ends in `brand=<b>` — settings untouched, and it is the same theme the PR table links to; `error=refresh_unverifiable` /
    `error=dev_theme_write_refused` / `error=theme_not_found` →
    ESCALATE, never
    `--allow-unverified` / `--allow-dev-theme` from the pipeline, and never a replacement theme:

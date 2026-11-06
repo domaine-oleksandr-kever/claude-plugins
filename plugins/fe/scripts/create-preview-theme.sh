@@ -47,7 +47,7 @@
 # block read (same resolution, one `--env`), so that stays true there.
 #
 # Usage:
-#   create-preview-theme.sh info
+#   create-preview-theme.sh info   (with ./multi-brand/brands/: brands=… note=brand_required — a build needs --brand)
 #   create-preview-theme.sh create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>]
 #                                  [--brand <b>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #                                  [--allow-unverified] [--allow-dev-theme]
@@ -67,6 +67,12 @@
 # Subcommands:
 #   info
 #       → store=… env=… dev_theme_id=… dev_theme_name=…                 (no mutation)
+#         [brands=<dir,…> note=brand_required …] — only with ./multi-brand/brands/: create/refresh with
+#         a build then need --brand <one of brands=>, the brand of the store pushed to. No brand= is
+#         printed: the repo maps no store to a brand, so the caller takes it from the session-theme:
+#         line's brand= or asks the developer. A brands dir with no `[A-Za-z0-9_-]+` directory prints
+#         `brands=` + `note=no_brands` (every build is refused). On a foreign store the
+#         `note=dev_theme_other_store` commands carry ` --brand <b>` too.
 #   create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push code (settings ignored) to a new unpublished theme
 #         (or an existing same-named one with --reuse) → overlay dev-theme settings
@@ -88,6 +94,12 @@
 #         (images and settings no overlay carries). No dev theme is read; `--reuse` is refused.
 #       → theme_id=… name=… store=… env=… preview_url=… editor_url=… reused=false duplicate_of=<id>
 #         [pushed=…] built=… [brand=…] — no overlay= key
+#       `error=duplicate_failed`: the CLI exited non-zero (log= + stderr tail); or it exited 0 with a
+#       refusal (`{"message","errors","requestId"}` on stdout — e.g. the theme cap; whatever ids it
+#       carries), quoted on the line with `errors=` (or `errors=none`) and `request_id=` when the CLI
+#       gave one, no theme created; or an answer whose id is the source's own (nothing pushed); or any
+#       other answer without a numeric id
+#       → `cli_answer=<first 300 chars|empty>` + log= + stderr tail, and a theme of that name may exist.
 #   --brand <b>  (create & refresh) — exported as BRAND=<b> to the build (`npm run <build-script>`)
 #       and printed as brand=; nothing else reads it. `[A-Za-z0-9_-]+`, else `error=bad_brand`.
 #       With ./multi-brand/brands/ present it must name one of its directories, else
@@ -222,7 +234,7 @@ set -euo pipefail
 # The `# Usage:` block above, verbatim — the suite pins the two together: the header is the
 # human-readable contract, this is what `--help` prints.
 USAGE='Usage:
-  create-preview-theme.sh info
+  create-preview-theme.sh info   (with ./multi-brand/brands/: brands=… note=brand_required — a build needs --brand)
   create-preview-theme.sh create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>]
                                  [--brand <b>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
                                  [--allow-unverified] [--allow-dev-theme]
@@ -948,7 +960,7 @@ BUILD_SCRIPT_SET=0
 BUILT="no"
 # Name-only, run as argv — the callers pre-approve this script's whole argv, so a value that
 # reached a shell would run with no permission prompt (rationale: header). Refuse before the store.
-known_brands() { (cd multi-brand/brands && ls -d -- */ 2>/dev/null | tr -d / | paste -sd, -); }
+known_brands() { (cd multi-brand/brands && ls -d -- */ 2>/dev/null | tr -d / | grep -E '^[A-Za-z0-9_-]+$' | paste -sd, -) || true; }
 vet_build_script() {
   if [ -z "$BRAND_ARG" ] && [ "$NO_BUILD" -eq 0 ] && [ -d multi-brand/brands ]; then
     fail "brand_required known=$(known_brands) — this repo builds one brand at a time (multi-brand/brands/): pass --brand <the brand of the store you push to> or --no-build; nothing was built or pushed"
@@ -1088,11 +1100,32 @@ create_duplicate() {
     tail -n 25 "$ERR"
     exit 1
   fi
+  # the CLI exits 0 on a refusal and says why only in {"message","errors","requestId"} on stdout;
+  # checked before the id, since a refusal may carry ids of its own
+  local refusal
+  refusal="$(printf '%s' "$PUSH_OUT" | jq -r 'def clean: tostring | gsub("[[:cntrl:]]+"; " ") | gsub("^ +| +$"; "") | .[0:300];
+    select(type == "object" and (.message | type) == "string" and (.errors | type) == "array")
+    | (.errors | map(clean) | map(select(. != ""))) as $e | ((.requestId // "") | clean) as $r
+    | "\"\(.message | clean)\" errors=\(if ($e | length) > 0 then ($e | join("; ") | .[0:300]) else "none" end)\(if $r != "" then " request_id=\($r)" else "" end)"' 2>/dev/null | head -1 || true)"
+  if [ -n "$refusal" ]; then
+    rm -f "$ERR"
+    fail "duplicate_failed source=$src_id store=$STORE — \`shopify theme duplicate\` refused the copy: $refusal; no theme was created, nothing was pushed"
+  fi
   THEME_ID="$(json_field "$PUSH_OUT" id | sed 's|.*/||')"
   case "$THEME_ID" in ''|*[!0-9]*)
-    fail "duplicate_failed source=$src_id store=$STORE — \`shopify theme duplicate --json\` answered without a numeric theme id, so the copy cannot be followed; a theme named \"$NAME\" may exist now — check \`shopify theme list --store $STORE\`; nothing was pushed" ;;
+    printf 'error=duplicate_failed source=%s store=%s — `shopify theme duplicate --json` answered without a numeric theme id or a refusal, so the copy cannot be followed; a theme named "%s" may exist now — check `shopify theme list --store %s`; nothing was pushed\n' "$src_id" "$STORE" "$NAME" "$STORE"
+    # C locale: a byte that is not valid UTF-8 must not abort the excerpt
+    local answer; answer="$(printf '%s' "$PUSH_OUT" | LC_ALL=C tr -s '[:cntrl:]' ' ' | LC_ALL=C cut -c1-300)"
+    printf 'cli_answer=%s\n' "${answer:-empty}"
+    auth_hint "$ERR"
+    printf 'log=%s\n' "$ERR"
+    printf -- '--- last 25 lines of shopify stderr ---\n'
+    tail -n 25 "$ERR"
+    exit 1 ;;
   esac
   rm -f "$ERR"
+  [ "$((10#$THEME_ID))" != "$((10#$src_id))" ] \
+    || fail "duplicate_failed source=$src_id store=$STORE — \`shopify theme duplicate --json\` answered with the source theme's own id, so no copy can be told apart from the source; nothing was pushed"
 
   start=$SECONDS
   while :; do
@@ -1137,7 +1170,15 @@ case "$MODE" in
     printf 'env=%s\n' "$TOML_ENV"
     printf 'dev_theme_id=%s\n' "$DEV_THEME_ID"
     printf 'dev_theme_name=%s\n' "$(theme_name_by_id "$DEV_THEME_ID")"
-    [ "$FOREIGN" -eq 0 ] || printf 'note=dev_theme_other_store toml_store=%s — the dev theme (the settings source) lives on the toml store, so plain create is refused on %s; refresh an existing theme there (`refresh --theme <id> --store %s`), or make a NEW preview with `create --name "<name>" --duplicate-of <a theme on %s> --store %s`\n' "$TOML_STORE" "$STORE" "$STORE" "$STORE" "$STORE"
+    BRANDS=""; [ -d multi-brand/brands ] && BRANDS="$(known_brands)"
+    if [ -d multi-brand/brands ] && [ -z "$BRANDS" ]; then
+      printf 'brands=\n'
+      printf 'note=no_brands — multi-brand/brands/ holds no directory named [A-Za-z0-9_-]+, so every build is refused; --no-build still runs\n'
+    elif [ -n "$BRANDS" ]; then
+      printf 'brands=%s\n' "$BRANDS"
+      printf 'note=brand_required — this repo builds one brand at a time: create and refresh with a build need --brand <one of brands=>, the brand of the store pushed to (the session-theme: line'"'"'s brand=, else ask the developer); --no-build needs none\n'
+    fi
+    [ "$FOREIGN" -eq 0 ] || printf 'note=dev_theme_other_store toml_store=%s — the dev theme (the settings source) lives on the toml store, so plain create is refused on %s; refresh an existing theme there (`refresh --theme <id> --store %s%s`), or make a NEW preview with `create --name "<name>" --duplicate-of <a theme on %s> --store %s%s`\n' "$TOML_STORE" "$STORE" "$STORE" "${BRANDS:+ --brand <b>}" "$STORE" "$STORE" "${BRANDS:+ --brand <b>}"
     ;;
 
   pin)

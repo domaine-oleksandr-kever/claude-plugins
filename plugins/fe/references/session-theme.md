@@ -41,11 +41,12 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
    out as its absolute path) so the developer sees what runs and can still stop it:
    - **Create one now** →
      `<fe root>/scripts/create-preview-theme.sh create --name "<name>" --reuse --pin-toml`
+     (plus `--brand <b>` when `info` prints `brands=` — b is the brand of the store pushed to, asked of the developer (a name from `brands=`), never guessed from the store handle)
    - **Use an existing theme** — only when the developer named one for this stream → its
      numeric id → `<fe root>/scripts/create-preview-theme.sh pin --theme <id>` — pin-only: it
      validates the id against the store and refuses the live theme, and it pushes nothing.
 
-   Ask (`AskUserQuestion`) only when the work-id carries no key to derive `<name>` from.
+   Ask (`AskUserQuestion`) only when the work-id carries no key to derive `<name>` from, or `info` prints `brands=` (the brand question).
 
    **Same-named theme first.** Before an unasked `create --reuse`, list the store's themes
    (`<fe root>/scripts/theme-json.sh themes --role unpublished`, with the run's `--store`): a
@@ -171,3 +172,5 @@ a multi-environment toml the block written is the block read, so that holds ther
 | pipeline **qa** | Rows marked `preview-theme` run against the session theme (`refresh --theme <id>`, settings preserved); create one only when nothing is recorded — and **record without pinning**, since phase 4 is past the ✋ and rewriting the developer's config unasked is not its call. |
 | pipeline **create-pr** | The session theme is the PR's preview theme — it outranks auto-creation (explicit `theme_name`/`theme_url`/`theme_admin_url` args still win over everything). |
 | pipeline **aftercare** | `refresh --theme <id from notes.md>` after each fix round — the same id. |
+
+In a repo with `multi-brand/brands/` every `create` and `refresh` above takes `--brand <b>` — steps 2 (create) and 4 (refresh) say where b comes from.

@@ -2854,6 +2854,8 @@ J
     printf '{"theme":{"id":%s,"preview_url":"https://acme-dev.myshopify.com/?preview_theme_id=%s","editor_url":"https://admin.shopify.com/store/acme-dev/themes/%s/editor"}}\n' "$nid" "$nid" "$nid" ;;
   "theme duplicate")
     [ -n "${FAKE_DUP_FAIL:-}" ] && { printf '%s\n' "$FAKE_DUP_FAIL" >&2; exit 1; }
+    [ -n "${FAKE_DUP_STDERR:-}" ] && printf '%s\n' "$FAKE_DUP_STDERR" >&2
+    [ -n "${FAKE_DUP_EMPTY:-}" ] && exit 0
     [ -n "${FAKE_DUP_JSON:-}" ] && { printf '%s\n' "$FAKE_DUP_JSON"; exit 0; }
     printf '{"theme":{"id":%s,"name":"copy","role":"unpublished"}}\n' "${FAKE_DUP_ID:-333}" ;;
   "theme delete") [ -n "${FAKE_DELETE_FAIL:-}" ] && exit 1; exit 0 ;;
@@ -5837,6 +5839,48 @@ if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_failed source=777' "$O" && grep 
    && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
 else bad D6-duplicate-failed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
+# D6b–D6e: the CLI exits 0 on a refusal and names the cause only in its --json answer — the line
+# quotes message, errors and request id and says no theme was created; any other answer without an
+# id shows a capped excerpt plus the stderr tail and keeps "may exist now"; nothing is pushed
+dup_run dup6b FAKE_DUP_JSON='{"message":"The theme '"'"'Develop CL'"'"' could not be duplicated due to errors","errors":["Maximum number of themes reached"],"requestId":"req-42"}' -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_failed source=777 store=elc-us-cl-uat .*refused the copy: "The theme '"'"'Develop CL'"'"' could not be duplicated due to errors" errors=Maximum number of themes reached request_id=req-42; no theme was created' "$O" \
+   && ! grep -q 'may exist now' "$O" && [ "$(grep -c . "$O")" -eq 1 ] && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D6b-duplicate-refused-errors "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+dup_run dup6c FAKE_DUP_JSON='{"message":"The theme '"'"'Develop CL'"'"' unexpectedly could not be duplicated ","errors":[],"requestId":"req-43"}' -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_failed .*unexpectedly could not be duplicated" errors=none request_id=req-43; no theme was created' "$O" \
+   && ! grep -q 'may exist now' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D6c-duplicate-refused-no-errors "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+dup_run dup6d FAKE_DUP_JSON='Something went wrong <html>' FAKE_DUP_STDERR='warn: upstream 502' -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_failed .*may exist now' "$O" && grep -qx 'cli_answer=Something went wrong <html> *' "$O" \
+   && grep -q '^log=' "$O" && grep -qx 'warn: upstream 502' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D6d-duplicate-not-json "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+dup_run dup6e FAKE_DUP_EMPTY=1 -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_failed .*may exist now' "$O" && grep -qx 'cli_answer=empty' "$O" \
+   && grep -q '^--- last 25 lines of shopify stderr ---$' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D6e-duplicate-empty-answer "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+# D6f: blank errors and an empty request id read as none, never as an empty value
+dup_run dup6f FAKE_DUP_JSON='{"message":"x","errors":["   "],"requestId":""}' -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_failed .*refused the copy: "x" errors=none; no theme was created' "$O"; then ok
+else bad D6f-duplicate-refused-blank-fields "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+# D6g: a byte that is not valid UTF-8 keeps the excerpt on one cli_answer= line
+dup_run dup6g FAKE_DUP_JSON="$(printf 'Error caf\xe9 tail-after-bad-byte')" -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && LC_ALL=C grep -q '^cli_answer=Error caf.* tail-after-bad-byte' "$O" && ! grep -qx 'empty' "$O"; then ok
+else bad D6g-duplicate-invalid-utf8 "rc=$rc out=$(LC_ALL=C tr '\n' ';' < "$O")"; fi
+# D6h: a refusal that carries a numeric id (here the source's) is still a refusal — never a copy to push into
+dup_run dup6h FAKE_DUP_JSON='{"message":"The theme could not be duplicated","errors":["Maximum number of themes reached"],"requestId":"req-44","theme":{"id":777}}' -- --duplicate-of 777 --no-build
+if [ "$rc" -ne 0 ] && grep -q '^error=duplicate_failed source=777 store=elc-us-cl-uat .*refused the copy: "The theme could not be duplicated" errors=Maximum number of themes reached request_id=req-44; no theme was created' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D6h-duplicate-refusal-with-id "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+# D6i: an answer whose id is the source's own cannot be told apart from the source — nothing pushed
+dup_run dup6i FAKE_DUP_ID=777 FAKE_LIST_AT_3="$DUPL_READY" -- --duplicate-of 777 --no-build
+if [ "$rc" -ne 0 ] && grep -q "^error=duplicate_failed source=777 store=elc-us-cl-uat .*answered with the source theme's own id" "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D6i-duplicate-source-id "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+# D6j: a success answer with a gid id is followed and pushed into
+dup_run dup6j FAKE_DUP_JSON='{"theme":{"id":"gid://shopify/OnlineStoreTheme/333","name":"copy","role":"unpublished","shop":"elc-us-cl-uat.myshopify.com"}}' FAKE_LIST_AT_3="$DUPL_READY" -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=333$' "$O" && [ "$(cpt_calls 'theme push --store elc-us-cl-uat --theme 333 ' "$L")" -eq 1 ]; then ok
+else bad D6j-duplicate-gid-success "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+
 # D7: --reuse with --duplicate-of is refused; a malformed --brand is refused before the store
 dup_run dup7 -- --duplicate-of 777 --reuse --no-build
 if [ "$rc" -eq 1 ] && grep -q '^error=--duplicate-of always makes a new theme' "$O" && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
@@ -5877,7 +5921,33 @@ run_cpt "$L" NO=1 CPT_BRAND_OUT="$TMP/dup7i.brand" -- refresh --theme 555 --bran
 if [ "$rc" -eq 0 ] && grep -q '^brand=jo-malone$' "$O" && [ "$(cat "$TMP/dup7i.brand")" = jo-malone ] \
    && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
 else bad D7i-refresh-known-brand "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+# D7j: info in a multi-brand repo names the brands and that a build needs --brand, never a guessed brand=
+rc=0; L="$TMP/dup7j"; : > "$L"
+run_cpt "$L" NO=1 -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'brands=clinique,jo-malone,mac' "$O" && grep -q '^note=brand_required .*--brand' "$O" && ! grep -q '^brand=' "$O"; then ok
+else bad D7j-info-names-brands "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+# D7j2: on a foreign store both suggested commands carry --brand; a dir --brand would reject is not listed
+mkdir -p "$BRANDS/has space" "$BRANDS/a,b"
+rc=0; L="$TMP/dup7j2"; : > "$L"
+run_cpt "$L" NO=1 -- info --store elc-us-cl-uat || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'brands=clinique,jo-malone,mac' "$O" \
+   && grep -q '^note=dev_theme_other_store .*`refresh --theme <id> --store elc-us-cl-uat --brand <b>`.*--store elc-us-cl-uat --brand <b>`' "$O"; then ok
+else bad D7j2-info-foreign-store-brand "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+# D7j3: a brands dir with no usable name says every build is refused, never asks for a --brand from an empty list
+rm -rf "$BRANDS"/clinique "$BRANDS"/jo-malone "$BRANDS"/mac
+rc=0; L="$TMP/dup7j3"; : > "$L"
+run_cpt "$L" NO=1 -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'brands=' "$O" && grep -q '^note=no_brands ' "$O" && ! grep -q 'brand_required' "$O"; then ok
+else bad D7j3-info-no-usable-brands "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 rm -rf "$CPTD/repo/multi-brand"
+rc=0; L="$TMP/dup7k"; : > "$L"
+run_cpt "$L" NO=1 -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^dev_theme_id=' "$O" && ! grep -q '^brands=' "$O" && ! grep -q 'brand_required' "$O"; then ok
+else bad D7k-info-no-brands "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/dup7k2"; : > "$L"
+run_cpt "$L" NO=1 -- info --store elc-us-cl-uat || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^note=dev_theme_other_store ' "$O" && ! grep -q -- '--brand' "$O"; then ok
+else bad D7k2-info-foreign-store-no-brand "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # D8: without --duplicate-of a foreign-store create is still overlay_store_mismatch, now naming the copy route
 rc=0; L="$TMP/dup8"; : > "$L"; run_cpt "$L" NO=1 -- create --name X --store elc-us-cl-uat --no-build || rc=$?
@@ -5916,7 +5986,7 @@ dc() { # dc <label> <want-rc> <want-substr|-> <args…> (stdin passes through)
 }
 # DC1–DC8: the four-item field — the good file is a real draft of the new format
 cat > "$DCD/stt.md" <<MD
-1. **Theme:** DEV UK store, theme **<confirm with the TL>**; \`Online Store > Themes > <theme> > Preview\`. Market: United Kingdom. $SENT
+1. **Theme:** DEV acme-uk-dev.myshopify.com (UK), theme **<confirm with the TL>**; \`Online Store > Themes > <theme> > Preview\`. Market: United Kingdom. $SENT
 2. **Object:** \`Theme settings > Delivery Banner\`; the banner on collection and product pages; the cart drawer **Delivery** row.
 3. **Setup:**
    - **Enable Delivery Banner** on, **Message Variation**: **Free over a threshold**, **Delivery Threshold** and **Standard Delivery Cost** as plain numbers, one with pence (e.g. 40, 2.95), then **Save**;
@@ -6369,6 +6439,36 @@ printf 'PR: https://github.com/o/r/pull/12 — t\n- Adds the section.\n- **Known
 printf 'PR: https://github.com/o/r/pull/12 — t\n- **Known limits:**\n- Desktop: the list caps at 10 notes.\n' > "$DCD/jira-label-bullet-colon.md"
 dc DC49c-jira-label-bullet-colon-ok 0 'brief_lines=2' file jira "$DCD/jira-label-bullet-colon.md"
 dc DC49b-jira-label-last 1 'fail label with no content' file jira "$DCD/jira-label-last.md"
+# DC49d–h: a bullet that is one bold sentence is content anywhere; a bare bold label still fails
+printf 'PR: https://github.com/a/b/pull/12 — fix: thing\n- Plain line about the change.\n- **After deploy, the panel is visible on the comparison page.**\n' > "$DCD/jira-bold-sentence-last.md"
+dc DC49d-jira-bold-sentence-last-ok 0 'brief_lines=2' file jira "$DCD/jira-bold-sentence-last.md"
+printf 'PR: https://github.com/a/b/pull/12 — t\n- **After deploy, the panel is visible on the comparison page.**\n- **Desktop:** the panel sits under the gallery.\n' > "$DCD/jira-bold-sentence-before-label.md"
+dc DC49e-jira-bold-sentence-before-label-ok 0 'brief_lines=2' file jira "$DCD/jira-bold-sentence-before-label.md"
+printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **Desktop**\n' > "$DCD/jira-bold-label-last.md"
+dc DC49f-jira-bold-label-last 1 'fail label with no content' file jira "$DCD/jira-bold-label-last.md"
+printf 'PR: https://github.com/a/b/pull/12 — t\n- **Desktop:**\n- the panel sits under the gallery.\n' > "$DCD/jira-bold-colon-content.md"
+dc DC49g-jira-bold-colon-then-content-ok 0 'brief_lines=2' file jira "$DCD/jira-bold-colon-content.md"
+printf 'PR: https://github.com/a/b/pull/12 — t\n- **Note**:\n- **Desktop:** the panel sits under the gallery.\n' > "$DCD/jira-label-then-label.md"
+dc DC49h-jira-label-then-label 1 'fail label with no content' file jira "$DCD/jira-label-then-label.md"
+printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- Desktop:\n' > "$DCD/jira-plain-label-last.md"
+dc DC49i-jira-plain-label-last 1 'fail label with no content' file jira "$DCD/jira-plain-label-last.md"
+# DC49j–n: an ellipsis, a stop inside a bracket or quote and a CJK stop end a sentence; one word with a stop is a label
+for c in 'j|ellipsis|The panel is visible…' 'k|bracket|The panel is visible (see the comparison page.)' 'l|quote|The panel is "visible."' 'm|cjk|パネルが表示されます。'; do
+  IFS='|' read -r id nm txt <<<"$c"
+  printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **%s**\n' "$txt" > "$DCD/jira-sentence-$nm.md"
+  dc "DC49$id-jira-bold-sentence-$nm-ok" 0 'brief_lines=2' file jira "$DCD/jira-sentence-$nm.md"
+done
+printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **Desktop.**\n' > "$DCD/jira-label-stop.md"
+dc DC49n-jira-one-word-stop-is-label 1 'fail label with no content' file jira "$DCD/jira-label-stop.md"
+# DC49o–s: a bold span with end punctuation is a sentence only at four or more words
+printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **What to check?**\n' > "$DCD/jira-label-question.md"
+dc DC49o-jira-bold-question-label-last 1 'fail label with no content' file jira "$DCD/jira-label-question.md"
+printf 'PR: https://github.com/a/b/pull/12 — t\n- **What changed?**\n- **Desktop:** the panel sits under the gallery.\n' > "$DCD/jira-label-question-then-label.md"
+dc DC49p-jira-bold-question-then-label 1 'fail label with no content' file jira "$DCD/jira-label-question-then-label.md"
+printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **Known limits.**\n' > "$DCD/jira-label-two-words-stop.md"
+dc DC49q-jira-bold-two-words-stop-is-label 1 'fail label with no content' file jira "$DCD/jira-label-two-words-stop.md"
+printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **Nothing else was changed.**\n' > "$DCD/jira-sentence-four-words.md"
+dc DC49r-jira-bold-four-words-ok 0 'brief_lines=2' file jira "$DCD/jira-sentence-four-words.md"
 
 echo "fe-scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

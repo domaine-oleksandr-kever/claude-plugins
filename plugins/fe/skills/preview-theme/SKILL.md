@@ -76,7 +76,7 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
 ## Steps — create
 
 1. **Detect.** Run `create-preview-theme.sh info`. **Success** → show the detected `store`,
-   `dev_theme_id`, and `dev_theme_name`. Any `error=` line → the errors reference's
+   `dev_theme_id`, and `dev_theme_name` (and `brands=` when `info` prints it — step 4 then needs `--brand`). Any `error=` line → the errors reference's
    **`error=` outcomes**, and never read the toml yourself. (`create-preview-theme.sh --help`
    prints the full call shape from the script itself.) **The section is on that store?** For
    each section type the branch changes, `<fe root>/scripts/theme-json.sh where-used <type>`
@@ -100,9 +100,9 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
 4. **Create.** Run `create-preview-theme.sh create --name "<name>" --reuse` (`--reuse` pushes
    into an existing same-named theme — the key and role name scope it to this ticket — instead
    of stacking a second one; drop it only when the developer asks for a separate theme).
-   The repo has `multi-brand/brands/` → add `--brand <b>`. b is the directory there that
-   matches the `store=` from step 1 (e.g. `mac` for a MAC store), never a ticket's short code; unclear →
-   ask. Without it the script refuses to build (`error=brand_required`). The script runs
+   The repo has `multi-brand/brands/` (`info` prints `brands=`) → add `--brand <b>`. b is the `brand=` on
+   this theme's `session-theme:` line, else ask the developer which brand the store sells (a name
+   from `brands=`) — never guessed from the store handle or a ticket's short code. Without it the script refuses to build (`error=brand_required`). The script runs
    `npm run build`, pushes the built code (settings ignored), then overlays the dev
    theme's settings — pass `--no-build` if the developer already built, or
    `--build-script <name>` when the production build is a different `package.json` script —
