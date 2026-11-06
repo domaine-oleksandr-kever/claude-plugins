@@ -11,7 +11,7 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   and 4 only; no headings, tables, `✅` markers, accordion, FAQ or document meta.
 - Item 1 names the environment, the store and a theme (ticket, developer's answer, or unconfirmed — never
   the PR's preview) and opens it; the storefront and Shopify admin hosts and the preview link appear there and
-  nowhere else (a third-party admin's host starts its route in item 3, once); the storefront host is always named, and only
+  nowhere else (a third-party admin's host starts its route in item 3, once); the storefront host is always named (unless the store is `unconfirmed: store:`), and only
   the `?preview_theme_id=` link is withheld with the placeholder theme, an unconfirmed id or a Prod store (route form instead); the
   preview link is bare (no code span, no label); the environment and the store never contradict each
   other.

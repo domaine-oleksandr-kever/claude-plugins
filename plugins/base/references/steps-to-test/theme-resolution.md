@@ -30,8 +30,8 @@ item 1, as the before, only when the ticket or the developer's answer names it �
 preview. Otherwise the before record is the PR's screenshots; QA reaches them through the PR-link comment.
 
 **Link or route** — a confirmed id on a DEV or UAT store → the bare preview link; a Prod store or an unconfirmed
-id → `Online Store > Themes > <name> > Preview`, never a preview link.
+id → `Online Store > Themes > <name> > Preview`, never a preview link; the storefront host is named either way.
 
-**Store with the placeholder theme** — named as the developer answered or as the ticket names it, with no
-host and no preview link (the route form instead). A multi-brand repo with no store in the answer or the
+**Store with the placeholder theme** — named as the developer answered or as the ticket names it, its
+storefront host still named, with no preview link (the route form instead). A multi-brand repo with no store in the answer or the
 ticket → the store is unconfirmed (`unconfirmed: store:`), not a question.
