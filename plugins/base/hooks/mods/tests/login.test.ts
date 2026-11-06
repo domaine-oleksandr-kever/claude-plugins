@@ -42,6 +42,13 @@ const READ: [string, string][] = [
   ['R12-gate-count-then-search-fill', `async (page) => { if (await page.locator('input[type=password]').count()) return 'locked'; await page.fill('input[name=q]', 'x'); }`],
   ['R13-customer-account-login', `async (page) => { await page.goto(base + '/account/login'); await page.fill('input[type=email]', 'qa@example.com'); await page.fill('input[type=password]', '${PW}'); await page.click('button[type=submit]'); }`],
 ]
+// references/storefront-login.md → Overlays and blocked clicks: the calls that carry scripts/storefront-overlay.js
+// (its own code is checked against this guard's ACT list in tests/base-storefront-overlay.mjs).
+const OVERLAY: [string, Record<string, unknown>][] = [
+  ['O01-playwright-addScriptTag', { code: `async (page) => { await page.addScriptTag({ path: '/p/base/scripts/storefront-overlay.js' }); return await page.evaluate(o => storefrontOverlay(o), { hide: ['#region-selector-modal'], probe: '[data-carousel-next]' }); }` }],
+  ['O02-devtools-sourcePath-uid', { sourcePath: '/p/base/scripts/storefront-overlay.js', args: ['1_4'], pageId: 1 }],
+  ['O03-devtools-inline-after-script', { function: `() => storefrontOverlay({ hide: ['#region-selector-modal'], probe: 'form[action*="/password"] button' })`, pageId: 1 }],
+]
 const FILL_SUBMIT = `(el) => { el.value = '${PW}'; el.form.submit(); }`
 // Element-scoped calls: Playwright's `target` (selector or snapshot ref) and `element`, chrome-devtools' `args` uids.
 const SCOPED_LOGIN: [string, Record<string, unknown>][] = [
@@ -61,6 +68,7 @@ describe('storefront login (matcher)', () => {
   for (const [label, code] of READ) test(`passes ${label}`, async () => expect(isStorefrontLogin(code)).toBe(false))
   for (const [label, args] of SCOPED_LOGIN) test(`login ${label}`, async () => expect(isLoginCall(args)).toBe(true))
   for (const [label, args] of SCOPED_READ) test(`passes ${label}`, async () => expect(isLoginCall(args)).toBe(false))
+  for (const [label, args] of OVERLAY) test(`passes ${label}`, async () => expect(isLoginCall(args)).toBe(false))
   test("codeOf: Playwright's code and function, chrome-devtools' function; anything else none", () => {
     expect(codeOf({ code: 'a' })).toBe('a')
     expect(codeOf({ function: 'b', pageId: 1 })).toBe('b')
@@ -107,6 +115,15 @@ describe('storefront login (tool.call)', () => {
     const { calls } = world(on)
     for (const [, code] of READ) expect((await call($, SCRIPT, code)).result).toBe('ok')
     expect(calls.below.length).toBe(READ.length)
+    expect(await eventsOf($, 'guard')).toEqual([])
+    expect((await call($, RUN, LOGIN[0]![1])).deny).toContain('storefront login code refused')
+  })
+
+  t('the overlay helper calls run on both MCPs and leave the refusal for real login code', async ($, on) => {
+    const { calls } = world(on)
+    expect((await $.tool.call({ tool: RUN, ...OVERLAY[0]![1] })).result).toBe('ok')
+    for (const [, args] of OVERLAY.slice(1)) expect((await $.tool.call({ tool: SCRIPT, ...args })).result).toBe('ok')
+    expect(calls.below.length).toBe(OVERLAY.length)
     expect(await eventsOf($, 'guard')).toEqual([])
     expect((await call($, RUN, LOGIN[0]![1])).deny).toContain('storefront login code refused')
   })

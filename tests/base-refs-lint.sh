@@ -426,5 +426,17 @@ else bad base-jira-reader-comment-count "agents/jira-reader.md does not re-count
 if grep -qF '3. **Field** — `form[action*="/password"] input[name=password]`' "$BASE/references/storefront-login.md"; then ok
 else bad base-storefront-login-field "references/storefront-login.md step 3 does not key the field on form[action*=\"/password\"]"; fi
 
+# the overlay section's calls name the shipped snippet and the one function it defines
+if grep -qF "<base root>/scripts/storefront-overlay.js" "$BASE/references/storefront-login.md" \
+  && grep -q '^function storefrontOverlay(opts) {$' "$BASE/scripts/storefront-overlay.js" \
+  && grep -qF 'storefrontOverlay(o)' "$BASE/references/storefront-login.md"; then ok
+else bad base-storefront-overlay-call "references/storefront-login.md → Overlays does not call scripts/storefront-overlay.js's storefrontOverlay"; fi
+
+# the sweep reference calls the shipped snippet and the one function it defines
+if grep -qF "<base root>/scripts/responsive-sweep.js" "$BASE/references/responsive-sweep.md" \
+  && grep -q '^function responsiveSweep(opts) {$' "$BASE/scripts/responsive-sweep.js" \
+  && grep -qF 'responsiveSweep({ table: true })' "$BASE/references/responsive-sweep.md"; then ok
+else bad base-responsive-sweep-call "references/responsive-sweep.md does not call scripts/responsive-sweep.js's responsiveSweep"; fi
+
 echo "base-refs-lint: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

@@ -6390,10 +6390,10 @@ if [ "$(printf '%s' "$UC" | wc -c)" -lt 900 ]; then ok; else bad DH12-uc-size "$
 assert_eq DH12-shopify-two-lines "$(dh_text base shopify | grep -v '^## ' | grep -c .)" 2
 assert_contains DH12-shopify-skill "$(dh_text base shopify)" "/base:shopify"
 SL="$(dh_text base shopify | grep 'storefront-login')"
-for n in '`<base root>/references/storefront-login.md`' 'password-protected storefront in a browser MCP' 'never with login code' '`browser_run_code_unsafe`, `browser_evaluate` or `evaluate_script`'; do
+for n in '`<base root>/references/storefront-login.md`' 'open a storefront in a browser MCP' 'a password-protected one' 'never with login code' '`browser_run_code_unsafe`, `browser_evaluate` or `evaluate_script`' 'before the first click → its overlay helper, once' 'a blocked click is never retried unchanged'; do
   assert_contains "DH12-login-$(printf '%s' "$n" | head -c 20 | tr -c 'a-zA-Z' '-')" "$SL" "$n"
 done
-if [ "$(printf '%s' "$SL" | wc -c)" -le 300 ]; then ok; else bad DH12-login-size "$(printf '%s' "$SL" | wc -c) bytes"; fi
+if [ "$(printf '%s' "$SL" | wc -c)" -le 420 ]; then ok; else bad DH12-login-size "$(printf '%s' "$SL" | wc -c) bytes"; fi
 [ -f "$BR/references/storefront-login.md" ] && ok || bad DH12-login-ref "references/storefront-login.md is missing"
 OLDN="f""nd"
 if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|gateway" "$BR/hooks/conventions-text.json"; then bad DH12-no-legacy "a legacy, host or store-channel name in conventions-text.json"; else ok; fi

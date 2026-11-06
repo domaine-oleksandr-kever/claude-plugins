@@ -23,3 +23,37 @@
    `domcontentloaded` before any read.
 6. **Verify** — still on `/password`, or a `form[action*="/password"]` on the page → the password is
    wrong or stale: ask for the current one; never submit the same one again.
+
+## Overlays and blocked clicks
+
+`<base root>/scripts/storefront-overlay.js` defines one in-page function, `storefrontOverlay(opts)`. It
+removes the known consent overlays (`#onetrust-consent-sdk`, `#CybotCookiebotDialog`) and each
+`opts.hide` selector, never an element that holds or sits in the password gate, and returns
+`{ removed, kept, covering }`: `removed` adds `×N` to a selector that removed N elements, and
+`covering` names each visible full-viewport fixed element and open modal still on the page. Every
+name it returns selects that one element. `opts.probe` (a selector) adds `probe`: `found`,
+`disabled` (also `pointer-events: none`), `hidden`, `offscreen` (also outside a clipping
+ancestor), or `covered` with `by` (the element at the target's centre) and `layer` (its outermost
+fixed ancestor that does not hold the target). It never fills or submits, so base's MCP guard lets
+it run.
+
+- **Playwright MCP** — one `browser_run_code_unsafe` call with inline `code` (its `filename` takes
+  only a file inside the project); leave out `hide` or `probe` you do not need:
+  `async (page) => { await page.addScriptTag({ path: '<base root>/scripts/storefront-overlay.js' }); return await page.evaluate(o => storefrontOverlay(o), { hide: ['<selector>'], probe: '<selector>' }); }`
+- **chrome-devtools MCP** — `evaluate_script` with `sourcePath: '<base root>/scripts/storefront-overlay.js'`
+  clears the known overlays; add `args: ['<uid>']` to probe that element too. With `hide` or a probe
+  selector: the same `sourcePath` with `format: 'script'` (defines the function until the next
+  navigation), then `function: "() => storefrontOverlay({ hide: ['<selector>'], probe: '<selector>' })"`.
+
+1. **When** — once after the page settles (`domcontentloaded`, past the login above) and before the
+   first click on it.
+2. **Blocked click** — a click that fails with `intercepts pointer events` or a timeout is never
+   retried unchanged: probe its target and act on the answer. `covered` → `hide` the `layer` (else
+   `by`), then click once more; `disabled` → never click it (a carousel at its end, a sold-out
+   variant): change the state that enables it, or report it; `hidden` / `offscreen` → open its
+   container or scroll it into view; `found: false` → snapshot again.
+3. **Project overlays** — a theme's own overlay (a region modal, a newsletter popup) is project
+   code: the plugin holds no selector for it. Take it from the developer, the project's notes or
+   memory, or a probe's `layer`, and pass it in `hide` from then on.
+4. **No consent** — removing a consent banner gives no consent: consent-gated scripts (analytics,
+   pixels, some widgets) stay off. A check that needs them goes to the developer.
