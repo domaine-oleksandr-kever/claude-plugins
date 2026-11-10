@@ -5880,6 +5880,26 @@ else bad D6i-duplicate-source-id "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep 
 dup_run dup6j FAKE_DUP_JSON='{"theme":{"id":"gid://shopify/OnlineStoreTheme/333","name":"copy","role":"unpublished","shop":"elc-us-cl-uat.myshopify.com"}}' FAKE_LIST_AT_3="$DUPL_READY" -- --duplicate-of 777 --no-build
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=333$' "$O" && [ "$(cpt_calls 'theme push --store elc-us-cl-uat --theme 333 ' "$L")" -eq 1 ]; then ok
 else bad D6j-duplicate-gid-success "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+# D6k–m: the duplicate names no cap — a refusal or an id-less answer on a store listing 100+ themes is
+# theme_limit with the count; at 99 the refusal stays duplicate_failed
+dupl_n() { # dupl_n <n>: the source 777 plus n-1 more themes
+  local i out='[{"id":777,"name":"Develop CL","role":"unpublished"}'
+  for ((i = 2; i <= $1; i++)); do out+=",{\"id\":$((5000 + i)),\"name\":\"t$i\",\"role\":\"unpublished\"}"; done
+  printf '%s]' "$out"
+}
+CAP_REFUSAL='{"message":"The theme '"'"'develop'"'"' could not be duplicated due to errors","errors":["Failed to duplicate theme"],"requestId":"req-45"}'
+dup_run dup6k FAKE_LIST="$(dupl_n 100)" FAKE_DUP_JSON="$CAP_REFUSAL" -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=theme_limit count=100 source=777 store=elc-us-cl-uat — store is at its theme cap (20 non-Plus / 100 Plus); `shopify theme duplicate` refused the copy: "The theme .*errors=Failed to duplicate theme request_id=req-45; delete an old theme' "$O" \
+   && ! grep -q 'duplicate_failed' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D6k-duplicate-refused-at-cap "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+dup_run dup6l FAKE_LIST="$(dupl_n 99)" FAKE_DUP_JSON="$CAP_REFUSAL" -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_failed source=777 store=elc-us-cl-uat .*refused the copy: .*request_id=req-45; no theme was created' "$O" \
+   && ! grep -q 'theme_limit' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D6l-duplicate-refused-below-cap "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+dup_run dup6m FAKE_LIST="$(dupl_n 100)" FAKE_DUP_JSON='Something went wrong <html>' -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=theme_limit count=100 source=777 .*refused the copy: an answer without a numeric theme id;' "$O" \
+   && ! grep -q 'duplicate_failed' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D6m-duplicate-no-id-at-cap "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # D7: --reuse with --duplicate-of is refused; a malformed --brand is refused before the store
 dup_run dup7 -- --duplicate-of 777 --reuse --no-build
@@ -6469,6 +6489,13 @@ printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **Known
 dc DC49q-jira-bold-two-words-stop-is-label 1 'fail label with no content' file jira "$DCD/jira-label-two-words-stop.md"
 printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **Nothing else was changed.**\n' > "$DCD/jira-sentence-four-words.md"
 dc DC49r-jira-bold-four-words-ok 0 'brief_lines=2' file jira "$DCD/jira-sentence-four-words.md"
+# DC49s–u: a bold span of four or more words is content without a stop; a 1–3 word span stays a label
+printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **After deploy, the banner is visible on the PDP**\n' > "$DCD/jira-sentence-no-stop.md"
+dc DC49s-jira-bold-sentence-no-stop-ok 0 'brief_lines=2' file jira "$DCD/jira-sentence-no-stop.md"
+printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **Note:**\n' > "$DCD/jira-label-note-last.md"
+dc DC49t-jira-bold-note-label-last 1 'fail label with no content' file jira "$DCD/jira-label-note-last.md"
+printf 'PR: https://github.com/a/b/pull/12 — t\n- Adds the section.\n- **See screenshots below**\n' > "$DCD/jira-label-three-words.md"
+dc DC49u-jira-bold-three-words-is-label 1 'fail label with no content' file jira "$DCD/jira-label-three-words.md"
 
 echo "fe-scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

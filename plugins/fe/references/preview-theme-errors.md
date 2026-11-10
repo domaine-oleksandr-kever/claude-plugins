@@ -119,6 +119,7 @@ neither `--no-build` nor a `package.json` in the directory gets past it.
 
 re-run with `--reuse` when this run didn't; never delete a theme on
 the store without the developer.
+On `--duplicate-of` it reads `error=theme_limit count=<n>` — the duplicate was refused (or answered no id) while the store lists 100+ themes; `--reuse` does not apply there, so name the themes that could go.
 
 ### `error=settings_drift`
 
@@ -258,6 +259,7 @@ kept…`): it still carries the source theme's code — re-push with `refresh --
   `theme list` does not carry that id or name (check the store — a brand has a store per region),
   or the listing gave no readable answer (the line says so; an auth `hint=` may follow) → re-run
   when the store answers. A name two themes share is `error=ambiguous_name` → pass the id.
+- **`error=theme_limit count=<n>`** → a refusal or an answer without an id on a store that lists 100+ themes: the cap (see `error=theme_limit`); below 100 the same answer stays `error=duplicate_failed`.
 - **`error=duplicate_failed`** → the build ran and nothing was pushed. Four shapes:
   `shopify theme duplicate` failed (`log=` + its last 25 lines; auth `hint=` lines as for a push);
   it **refused** the copy — the line quotes the CLI's message with `errors=` and `request_id=` when

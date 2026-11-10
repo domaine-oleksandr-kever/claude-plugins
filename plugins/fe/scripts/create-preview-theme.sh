@@ -99,6 +99,7 @@
 #       carries), quoted on the line with `errors=` (or `errors=none`) and `request_id=` when the CLI
 #       gave one, no theme created; or an answer whose id is the source's own (nothing pushed); or any
 #       other answer without a numeric id
+#       `error=theme_limit count=<n>`: a refusal or an answer without an id while the listing holds 100+ themes
 #       → `cli_answer=<first 300 chars|empty>` + log= + stderr tail, and a theme of that name may exist.
 #   --brand <b>  (create & refresh) — exported as BRAND=<b> to the build (`npm run <build-script>`)
 #       and printed as brand=; nothing else reads it. `[A-Za-z0-9_-]+`, else `error=bad_brand`.
@@ -1067,6 +1068,15 @@ dup_ready() {
   printf '%s' "$THEME_LIST" | jq -e --arg id "$1" \
     'any(.. | objects | select((.id|tostring|sub(".*/";""))==$id); .processing != true)' >/dev/null 2>&1
 }
+# themes in the loaded listing (distinct ids); 0 when it is unreadable
+theme_count() { printf '%s' "$THEME_LIST" | jq '[.. | objects | select(has("id")) | .id] | unique | length' 2>/dev/null || printf '0'; }
+# the duplicate CLI names no cap, so a refusal on a store listing 100 or more themes is read as it
+dup_cap_check() {
+  local n; n="$(num_or_empty "$(theme_count)")"
+  [ "${n:-0}" -ge 100 ] || return 0
+  rm -f "$ERR"
+  fail "theme_limit count=$n source=$2 store=$STORE — store is at its theme cap (20 non-Plus / 100 Plus); \`shopify theme duplicate\` refused the copy: $1; delete an old theme and re-run"
+}
 num_or_empty() { case "$1" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$1" ;; esac; }
 DUP_TIMEOUT="$(num_or_empty "${FE_CPT_DUPLICATE_TIMEOUT:-}")"; DUP_TIMEOUT="${DUP_TIMEOUT:-300}"
 DUP_POLL="$(num_or_empty "${FE_CPT_DUPLICATE_POLL:-}")"; DUP_POLL="${DUP_POLL:-5}"
@@ -1108,11 +1118,13 @@ create_duplicate() {
     | (.errors | map(clean) | map(select(. != ""))) as $e | ((.requestId // "") | clean) as $r
     | "\"\(.message | clean)\" errors=\(if ($e | length) > 0 then ($e | join("; ") | .[0:300]) else "none" end)\(if $r != "" then " request_id=\($r)" else "" end)"' 2>/dev/null | head -1 || true)"
   if [ -n "$refusal" ]; then
+    dup_cap_check "$refusal" "$src_id"
     rm -f "$ERR"
     fail "duplicate_failed source=$src_id store=$STORE — \`shopify theme duplicate\` refused the copy: $refusal; no theme was created, nothing was pushed"
   fi
   THEME_ID="$(json_field "$PUSH_OUT" id | sed 's|.*/||')"
   case "$THEME_ID" in ''|*[!0-9]*)
+    dup_cap_check "an answer without a numeric theme id" "$src_id"
     printf 'error=duplicate_failed source=%s store=%s — `shopify theme duplicate --json` answered without a numeric theme id or a refusal, so the copy cannot be followed; a theme named "%s" may exist now — check `shopify theme list --store %s`; nothing was pushed\n' "$src_id" "$STORE" "$NAME" "$STORE"
     # C locale: a byte that is not valid UTF-8 must not abort the excerpt
     local answer; answer="$(printf '%s' "$PUSH_OUT" | LC_ALL=C tr -s '[:cntrl:]' ' ' | LC_ALL=C cut -c1-300)"
