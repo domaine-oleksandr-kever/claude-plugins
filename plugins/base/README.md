@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.20.2**.
+Current release: **base v0.21.0**.
 
 ## Status
 
@@ -123,6 +123,7 @@ that every cited path exists.
 | `references/shopify-recipes.md` | `/base:shopify`'s Admin GraphQL recipes, validated on API 2026-10 with their scopes and how to read each answer; the PDP "why does X not show" checklist; the `metafieldsSet` and `productUpdate` templates |
 | `references/shopify-custom-data.md` | metafield and metaobject rules: `$app` vs merchant namespaces, definitions, `metafieldsSet` writes, metaobject `ACTIVE` status, reference metafields |
 | `references/shopify-analytics.md` | ShopifyQL through `shopifyqlQuery`: the wrapper, `parseErrors`, `read_reports`, example statements |
+| `references/shopify-sidekick-relay.md` | `/base:shopify`'s runner without API access: one prompt per recipe the developer pastes into the admin's Sidekick, the raw-JSON answer read as data, writes drafted by Sidekick and published by the developer, what stays out of Sidekick, the once-per-store experiments in `notes.md` |
 
 The fetchers (`scripts/jira-attachments.sh`, `scripts/external-screenshots.sh`,
 `scripts/figma-rest.sh`) share `scripts/_common.sh`. Credentials go in a private `0600` curl config,
@@ -154,7 +155,7 @@ same names.
 | `/base:save-task-context` | writes what the conversation holds into `.claude/tasks/<work-id>/` — ticket fields, comments, decisions, `progress.md` in the team's series order — without spawning a reader |
 | `/base:report-plugin-issue` | drafts a sanitized GitHub issue for a base defect, with the `/base-doctor` output and the `base.events` tail, and posts it after your approval |
 | `/base:worktree` | a sibling `git worktree` on `feat/<work-id>` with its own dev port, sharing the task workspace; `--remove` tears it down |
-| `/base:shopify` | store questions and Admin GraphQL: a routing table to the recipes, answers with evidence (field, value, file key), validation through a remote store connector's own validate tool, the dev-mcp `validate` tool or `scripts/shopify-validate.cjs` (never blocking), a mutation only after a "yes" in a separate turn, then a runner table: Shopify CLI `store execute`, a remote store connector, an Admin token, or a ready `.graphql` file for GraphiQL |
+| `/base:shopify` | store questions and Admin GraphQL: a routing table to the recipes, answers with evidence (field, value, file key), validation through a remote store connector's own validate tool, the dev-mcp `validate` tool or `scripts/shopify-validate.cjs` (never blocking), a mutation only after a "yes" in a separate turn, then a runner table: Shopify CLI `store execute`, a remote store connector, an Admin token, a ready `.graphql` file for GraphiQL, or the Sidekick relay (a prompt the developer pastes into the admin's Sidekick, JSON back) |
 
 `/base:worktree` copies `.env` into a new worktree, because base's fetchers read their credentials
 from it. It also copies every path that a team plugin names in its convention section, on one line:

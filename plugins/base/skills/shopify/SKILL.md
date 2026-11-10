@@ -36,6 +36,7 @@ Read the reference the question needs, then pick the recipe. All files are under
 | Which store, plan and domain this is | `shopify-recipes.md` → 12 | `ShopEnv` |
 | Why X does not show on the product page | `shopify-recipes.md` → PDP checklist | the steps in order |
 | Set a metafield, change a product | `shopify-recipes.md` → Mutation templates | `SetMetafields`, `ProductUpdate` |
+| No runner but the admin is open (Sidekick) | `shopify-sidekick-relay.md` | the relay prompt for the recipe |
 | Namespaces, definitions, metaobject status, references | `shopify-custom-data.md` | its operations |
 | Sales, orders, trends, top products | `shopify-analytics.md` | `ShopifyqlReport` |
 
@@ -56,7 +57,8 @@ A schema question the recipes do not cover → the dev-mcp docs search (`search_
 2. Get the developer's "yes" in a **separate turn**. A yes given before the document was shown does
    not count. The one exception: an autonomous run whose approval record pre-authorizes test-state
    mutations (`/fe:ship`'s ✋ record) runs them without a new yes, under that record's rules.
-3. Run it once. Read `userErrors`; empty means written.
+3. Run it once (through the relay: the developer publishes Sidekick's draft). Read `userErrors`;
+   empty means written.
 4. Re-read the value with the matching recipe and report it.
 5. A refusal (a runner's, a connector's or the API's) is quoted verbatim. Never send the same
    document again; change it only when the refusal says what to change, then start again at step 1.
@@ -83,6 +85,8 @@ the recipes target):
   say so once; the script already deleted a half-written `_npx` install once and retried, so
   `server_exited_early` means offline or npm cannot install: relay its hint to the developer.
 - Invalid → fix and validate again (the same `artifactId`, `revision` + 1).
+- **The Sidekick relay** (Runners row 5): its natural-language prompt has no document to validate;
+  its GraphQL variant validates like any document.
 - **Scopes:** the `Required scopes` line is a lower bound, and often absent for a write
   (`metafieldsSet`, `metafieldDefinitionCreate` name none). Such a write needs the owner type's
   write scope (`write_products` for a product; the recipe's scope comment says which).
@@ -97,7 +101,8 @@ skill hands it the document and the variables.
 | 1 | fe is installed, and Shopify CLI ≥ 4 holds a stored `shopify store auth` for this store | fe's `<fe root>/scripts/shopify-admin-gql.sh` — it owns engine selection, mutation safety and the token fallback |
 | 2 | A remote store connector in the session lists this store (today the Domaine gateway) | the connector's GraphQL tool, one document plus variables per call; its tool description sets the rest |
 | 3 | fe is installed, and an Admin token is in the repo's `.env` | the same fe script (`--engine token`) |
-| 4 | None of the above | write the operation and its variables as a ready `.graphql` file in `.claude/tasks/<work-id>/tmp/` (`.claude/base-tmp/` without a workspace), and hand the path over for the Shopify GraphiQL app; the developer pastes the JSON result back |
+| 4 | None of the above, and the developer said the store has the Shopify GraphiQL app | write the operation and its variables as a ready `.graphql` file in `.claude/tasks/<work-id>/tmp/` (`.claude/base-tmp/` without a workspace), and hand the path over for the Shopify GraphiQL app; the developer pastes the JSON result back |
+| 5 | None of the above — the developer is in the store's admin as a staff user | the Sidekick relay: `${CLAUDE_PLUGIN_ROOT}/references/shopify-sidekick-relay.md` — one prompt per recipe written into the chat, the developer pastes it into Sidekick and the JSON answer back; writes are drafted by Sidekick and published by the developer |
 
-Without fe, use row 2 or row 4. fe's script defaults to `2026-10`, the recipes' version. Never run
+Without fe, use rows 2, 4 or 5. fe's script defaults to `2026-10`, the recipes' version. Never run
 `shopify store auth` yourself: it opens a browser. Never read `.env`; the script reads the token.

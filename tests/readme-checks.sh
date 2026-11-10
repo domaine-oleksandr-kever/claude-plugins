@@ -824,5 +824,11 @@ EOF_TYPES
 # the PR-link Jira comment never carries the preview theme: it is deleted after merge and the link rots
 has "$ROOT/plugins/fe/skills/create-pull-request/SKILL.md" '**Never the preview theme link, theme id or editor URL in the Jira comment: the preview theme is deleted after merge and the link rots.**' fe-cpr-jira-comment-no-preview
 
+# /base:shopify's fifth runner: the Sidekick relay is routed, documented and pointed to from fe
+has "$ROOT/plugins/base/skills/shopify/SKILL.md" 'shopify-sidekick-relay.md' base-shopify-sidekick-routed
+has "$ROOT/plugins/base/references/shopify-sidekick-relay.md" 'Reply with only one JSON object' base-sidekick-format-clause
+has "$ROOT/plugins/base/README.md" '| `references/shopify-sidekick-relay.md` |' base-readme-sidekick-reference-row
+has "$ROOT/plugins/fe/references/store-auth-troubleshooting.md" 'Sidekick relay' fe-store-auth-sidekick-pointer
+
 echo "readme-checks: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi
