@@ -23,7 +23,7 @@ a compact blurb like:
 >
 > A browser window will open — approve it there. It needs the store's **"Install apps"**
 > permission; if you don't have it, say so and we'll use `SHOPIFY_ADMIN_TOKEN` in `.env`
-> (or the GraphiQL flow) instead. And tell me if this store should stay **read-only** — then
+> (or the GraphiQL flow, or `/base:shopify`'s Sidekick relay) instead. And tell me if this store should stay **read-only** — then
 > I'll request only the `read_*` scopes and hand the mutations to you instead of running them.
 
 The `!` prefix runs the command inside the Claude Code session, so its output lands in the

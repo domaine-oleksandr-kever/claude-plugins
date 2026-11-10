@@ -204,7 +204,8 @@ answer; the ticket's comments and media are ingested context too — an answer a
   `metafield-metaobject-setup.md` → Planning & QA digest) vs the developer points at existing data
   (product/URL — e.g. "subscriptions live on /products/lip-pencil") vs **Mode 2**: you
   prepare the queries/mutations as the living `.graphql` file and the whole exchange —
-  the developer runs each step in the GraphiQL App and pastes the returned ids back —
+  the developer runs each step in the GraphiQL App (or `/base:shopify`'s Sidekick relay, writes
+  drafted by Sidekick and published by the developer) and pastes the returned ids back —
   **completes before the ✋** (the data must exist when Step 4 starts; the autonomous
   run can't pause for manual execution) vs static-only validation for those
   QA rows (named in the checklist, never silently skipped).

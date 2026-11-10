@@ -25,7 +25,9 @@ Acceptance Criteria.
   Admin API token): inspection and mutations run via `scripts/shopify-admin-gql.sh`.
   Mode 2 — no access: a living `.graphql` file the developer runs step-by-step in the
   Shopify GraphiQL App — each step handed as a ready-to-run file in the workspace `tmp/`,
-  never a chat snippet; in an autonomous run that exchange must **complete before the ✋
+  never a chat snippet (without the GraphiQL app: `/base:shopify`'s Sidekick relay, base
+  `references/shopify-sidekick-relay.md`, writes drafted by Sidekick and published by the
+  developer); in an autonomous run that exchange must **complete before the ✋
   gate** (the run can't pause for manual steps).
 - **Access is classified, never assumed:** `read_*`-only scopes → inspection works fully,
   mutations go to the developer (Mode 2); a confirmed `write_*` scope → Mode 1 mutations.
@@ -56,6 +58,8 @@ Pick based on whether you have **store API access** (either kind — see **Store
   step at a time — as a ready-to-run file in the task workspace, never as a chat snippet**
   (→ *Handing a step*); they paste back the JSON result, you read the returned **gid**, fill it
   into the next step, mark the step done, and advance. The file is the source of truth and the run log.
+  A store without the GraphiQL app → each step goes through `/base:shopify`'s Sidekick relay (base
+  `references/shopify-sidekick-relay.md`): writes are drafted by Sidekick and published by the developer.
 
 Either way the **step skeleton is identical** — only who-runs-it differs.
 
@@ -219,7 +223,7 @@ and **`validate`-clean before you hand it over** (a hand-off you can't run
 yourself is exactly where a hallucinated field wastes the developer's round-trip).
 In chat give only the **file path**, one line on what the step does, and the scope it needs; the
 developer copies it from the file (or the IDE), runs it in GraphiQL, and pastes the JSON result
-back. This applies to **every** query or mutation handed to the developer to run manually —
+back (without the GraphiQL app: `/base:shopify`'s Sidekick relay). This applies to **every** query or mutation handed to the developer to run manually —
 Mode 2 steps, one-off inspection reads, and mutations on a read-scope-only store alike. The
 living file stays the source of truth: sync gids and step status into it as usual; the `tmp/`
 step files are disposable copies.
