@@ -287,6 +287,8 @@ expect CD39g-switches-shopify-validate-valid 0 "!switches"
 rc=0; BASE_SHOPIFY_VALIDATE=no BASE_SHOPIFY_VALIDATE_TIMEOUT=900 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
 expect CD39h-switches-shopify-validate-invalid 0 'WARN  switches' 'BASE_SHOPIFY_VALIDATE="no" is read as on — only 0 turns it off' \
   'BASE_SHOPIFY_VALIDATE_TIMEOUT="900" is read as 90 — seconds, 1-600'
+rc=0; BASE_CLIPBOARD=no node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD39k-switches-clipboard-invalid 0 'WARN  switches' 'BASE_CLIPBOARD="no" is read as on — only 0 turns it off'
 
 # ----------------------------------------------------------------------------------- cache --
 # Claude Code keeps every installed version under cache/domaine/<name>/: the doctor lists the ones no install

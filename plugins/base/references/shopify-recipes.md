@@ -1,10 +1,10 @@
 # Shopify store recipes — Admin GraphQL, validated
 
 The store questions `/base:shopify` answers, as ready operations. Every operation is one document
-plus variables, so it runs unchanged through every runner in the skill's runner table. All of them
-passed the dev-mcp `validate` tool against **Admin API 2026-10**. The scope comment on each is the
-validator's `Required scopes` line; where the validator names none for a write, the comment gives
-the owner type's write scope.
+plus variables, so it runs unchanged through runners 1–4 of the skill's runner table (the Sidekick
+relay derives a prompt from it). All of them passed the dev-mcp `validate` tool against **Admin API
+2026-10**. The scope comment on each is the validator's `Required scopes` line; where the validator
+names none for a write, the comment gives the owner type's write scope.
 
 Version: the recipes were validated on `2026-10`, the version fe's runner defaults to.
 
@@ -339,8 +339,9 @@ Custom data rules (namespaces, definitions, metaobject status) live in `shopify-
 ## Mutation templates
 
 The discipline is the skill's: show the full document and variables, get a "yes" in a separate
-turn, run it once, read `userErrors`, then re-read the value with the matching recipe. A refusal is
-quoted verbatim; the same document is never sent again.
+turn, run it once, read `userErrors` (through the Sidekick relay: the draft card's error text), then
+re-read the value with the matching recipe. A refusal is quoted verbatim; the same document is never
+sent again.
 
 ### metafieldsSet
 

@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.21.0**.
+Current release: **base v0.22.0**.
 
 ## Status
 
@@ -123,7 +123,7 @@ that every cited path exists.
 | `references/shopify-recipes.md` | `/base:shopify`'s Admin GraphQL recipes, validated on API 2026-10 with their scopes and how to read each answer; the PDP "why does X not show" checklist; the `metafieldsSet` and `productUpdate` templates |
 | `references/shopify-custom-data.md` | metafield and metaobject rules: `$app` vs merchant namespaces, definitions, `metafieldsSet` writes, metaobject `ACTIVE` status, reference metafields |
 | `references/shopify-analytics.md` | ShopifyQL through `shopifyqlQuery`: the wrapper, `parseErrors`, `read_reports`, example statements |
-| `references/shopify-sidekick-relay.md` | `/base:shopify`'s runner without API access: one prompt per recipe the developer pastes into the admin's Sidekick, the raw-JSON answer read as data, writes drafted by Sidekick and published by the developer, what stays out of Sidekick, the once-per-store experiments in `notes.md` |
+| `references/shopify-sidekick-relay.md` | `/base:shopify`'s runner without API access, chosen at its store-route question: one prompt per recipe the developer pastes into the admin's Sidekick (put on the clipboard by `scripts/clipboard.sh`, shown in the chat too), the JSON object Sidekick composes read as data (raw API JSON only once experiment (b) passed), writes drafted by Sidekick and published by the developer, what stays out of Sidekick, the once-per-store experiments in `notes.md` |
 
 The fetchers (`scripts/jira-attachments.sh`, `scripts/external-screenshots.sh`,
 `scripts/figma-rest.sh`) share `scripts/_common.sh`. Credentials go in a private `0600` curl config,
@@ -142,6 +142,7 @@ slim resizes and compacts.
 | `scripts/storefront-overlay.js` | a browser MCP session (`references/storefront-login.md` → Overlays and blocked clicks) | a page snippet, not a CLI: `storefrontOverlay({ hide, probe })` removes `#onetrust-consent-sdk`, `#CybotCookiebotDialog` and the caller's `hide` selectors (never the password gate), lists what still covers the page (a host whose open shadow root holds the overlay included), and probes one target (`disabled`, `hidden`, `offscreen`, `covered` by what); Playwright loads it with `page.addScriptTag`, chrome-devtools with `evaluate_script` `sourcePath` on a copy in the project's `.claude/tmp/` (it reads no path outside the project) |
 | `scripts/responsive-sweep.js` | a browser MCP session (`references/responsive-sweep.md`), fe's develop and QA skills before a visual change's result is shown | a page snippet, not a CLI: `responsiveSweep({ widths })` lists the widths to visit (320–1920 every 40 px plus each breakpoint and 1 px below), `responsiveSweep({ root })` measures the current one (sideways page scroll, an element out of the viewport, spilled content, text cut by its box, short text on 2+ lines; open shadow roots walked, an element there named `<host> >> <element>`), `responsiveSweep({ table: true })` folds them into one capped text table of width ranges; Playwright loops the widths in one `browser_run_code_unsafe` call, chrome-devtools `emulate`s each viewport and evaluates a copy in the project's `.claude/tmp/` |
 | `scripts/shopify-validate.cjs` | `/base:shopify` where no dev-mcp server is loaded (a cloud session) | validates one Admin GraphQL document through `npx -y @shopify/dev-mcp@latest` over stdio: `--file`, `--code` or stdin, `--version` (default `2026-10`); prints `result=valid\|invalid\|unavailable` and the server's detail text; exit 0 / 1 / 3 (unavailable: send the operation anyway), 2 = usage; a timeout before the server speaks leaves `npx` to finish its install instead of killing it, and when `npx` exits before the server speaks it deletes the spec's `_npx` dir once (a half-written install; `note=npx_cache_reset` on stderr) and retries, else `error=server_exited_early` names that dir |
+| `scripts/clipboard.sh` | `/base:shopify`'s Sidekick relay | copies one text (stdin or `--file`) to the system clipboard with the first of `pbcopy`, `wl-copy`, `xclip`, `xsel`, `clip.exe` on `PATH`; prints one line `result=copied tool=<name> bytes=<n>` (exit 0) or `result=unavailable error=empty` (exit 2, also `error=usage`) / `error=disabled\|no_clipboard_tool\|copy_failed` (exit 3); never logs the text |
 
 ## Skills
 
@@ -155,7 +156,7 @@ same names.
 | `/base:save-task-context` | writes what the conversation holds into `.claude/tasks/<work-id>/` — ticket fields, comments, decisions, `progress.md` in the team's series order — without spawning a reader |
 | `/base:report-plugin-issue` | drafts a sanitized GitHub issue for a base defect, with the `/base-doctor` output and the `base.events` tail, and posts it after your approval |
 | `/base:worktree` | a sibling `git worktree` on `feat/<work-id>` with its own dev port, sharing the task workspace; `--remove` tears it down |
-| `/base:shopify` | store questions and Admin GraphQL: a routing table to the recipes, answers with evidence (field, value, file key), validation through a remote store connector's own validate tool, the dev-mcp `validate` tool or `scripts/shopify-validate.cjs` (never blocking), a mutation only after a "yes" in a separate turn, then a runner table: Shopify CLI `store execute`, a remote store connector, an Admin token, a ready `.graphql` file for GraphiQL, or the Sidekick relay (a prompt the developer pastes into the admin's Sidekick, JSON back) |
+| `/base:shopify` | store questions and Admin GraphQL: a routing table to the recipes, answers with evidence (field, value, file key), validation through a remote store connector's own validate tool, the dev-mcp `validate` tool or `scripts/shopify-validate.cjs` (never blocking), a mutation only after a "yes" in a separate turn, then a runner table: Shopify CLI `store execute`, a remote store connector, an Admin token, and when none holds one `AskUserQuestion` per store (remembered as `store-route:` in `notes.md`) between a ready `.graphql` file for GraphiQL, the Sidekick relay (a prompt put on the clipboard by `scripts/clipboard.sh` and shown in the chat, which the developer pastes into the admin's Sidekick, JSON back), the developer's own `shopify store auth` or stop |
 
 `/base:worktree` copies `.env` into a new worktree, because base's fetchers read their credentials
 from it. It also copies every path that a team plugin names in its convention section, on one line:
@@ -601,6 +602,7 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `BASE_DOGFOOD` | off | `1` turns dogfood mode on, `0` turns it off for an account `dogfood.json` lists (Dogfood mode): the `dogfood` convention (the `start rules` and `SubagentStart` command hooks), the `plugin_defect` tool, the nudge and the one blocked stop after a failed plugin script (the `Stop` command hook), `/base-defects`, the doctor's `defects` row. Off, none of them exists |
 | `BASE_DOGFOOD_REPO` | the marketplace repo | `<owner>/<repo>` a `plugin_defect` call with `github: true` (or, where nothing draws, without `github: false`) files its issue in; unset, the github repo of the marketplace base was installed from (`known_marketplaces.json`), and without one the tool asks for this switch |
 | `BASE_AUTOSAVE` | on | `0` turns the workspace autosave levers off: the stale-workspace line on a prompt, the block at turn end (at most once per 3 turns; the `Stop` command hook reads it), the `compact:` marker before an auto-compact (the `PreCompact` command hook reads it), the `autosave-state.json` mirror. `base.progress` still carries `stale` |
+| `BASE_CLIPBOARD` | on | `0` makes `scripts/clipboard.sh` answer `result=unavailable` (`error=disabled`, exit 3) without probing a clipboard tool: the Sidekick relay prompt stays in the chat only |
 | `BASE_SHOPIFY_VALIDATE` | on | `0` makes `scripts/shopify-validate.cjs` answer `result=unavailable` (`error=disabled`, exit 3) without spawning the server |
 | `BASE_SHOPIFY_VALIDATE_TIMEOUT` | `90` | seconds `scripts/shopify-validate.cjs` waits in all (the first `npx` download included) before it answers `error=timeout`; 1-600, another value is read as `90`; `--timeout` outranks it |
 
@@ -637,6 +639,7 @@ Agents never read `.env` themselves.
 | `tests/base-review-flow-sim.sh` | `scripts/review-scope.sh` against scratch git repos: the base, the merge-base, the hash over tracked and untracked work, the build-dirtied exclusion, the `--check` marker verdicts (fresh / stale / other-branch / none, read-only, per worktree), bash 3.2 |
 | `tests/base-qa-stores-sim.sh` | `scripts/qa-stores.cjs`: `list`, `get` (JSON and `--field` raw values, a missing field prints nothing, an unknown field is a usage error), `find`, `set`, `unset`, `path`, file and dir modes, the password printed by `get` only |
 | `tests/base-shopify-validate-sim.sh` | `scripts/shopify-validate.cjs` against a fake `npx` on `PATH`: the handshake and the constant prompt, valid / invalid, stray frames, every unavailable shape incl. `server_exited_early` and its `_npx` dir, the one `_npx` cache reset and retry (answering, and exiting early again), a plain `INVALID` status, the timeout and the kill after the server spoke, no kill while `npx` still installs, `BASE_SHOPIFY_VALIDATE=0`, usage; `SIM_LIVE=1` adds two cases against the real server |
+| `tests/base-clipboard-sim.sh` | `scripts/clipboard.sh` against fake clipboard tools on a built `PATH`: `pbcopy` first, the `xclip` and `xsel` arguments, a failing tool (`copy_failed`, the next not tried), no tool, empty stdin and file, `--file`, `BASE_CLIPBOARD=0` (no tool run) and `1`, the usage errors, `--help`, no temp file left, the text never on stdout or stderr |
 
 [ARCHITECTURE.md](ARCHITECTURE.md) tells how the pieces fit: the mods, the atoms that band reads,
 and why some checks stay scripts.

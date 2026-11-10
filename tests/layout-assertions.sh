@@ -113,6 +113,8 @@ for f in "$CANON" \
          "$ROOT/plugins/base/scripts/shopify-validate.cjs" \
          "$ROOT/plugins/base/scripts/edit-delegation.cjs" \
          "$ROOT/tests/base-shopify-validate-sim.sh" \
+         "$ROOT/plugins/base/scripts/clipboard.sh" \
+         "$ROOT/tests/base-clipboard-sim.sh" \
          "$ROOT/plugins/fe/.claude-plugin/plugin.json" \
          "$ROOT/plugins/fe/hooks/hooks.json" \
          "$ROOT/plugins/fe/hooks/mods/register.ts" \
@@ -142,7 +144,7 @@ for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh" "$ROOT/scripts/
          "$PLUGIN_DIR/scripts/external-screenshots.sh" "$PLUGIN_DIR/scripts/figma-rest.sh" \
          "$ROOT/plugins/base/scripts/worktree-setup.sh" "$ROOT/plugins/base/scripts/jira-attachments.sh" \
          "$ROOT/plugins/base/scripts/external-screenshots.sh" "$ROOT/plugins/base/scripts/figma-rest.sh" \
-         "$ROOT/plugins/base/scripts/review-scope.sh"; do
+         "$ROOT/plugins/base/scripts/review-scope.sh" "$ROOT/plugins/base/scripts/clipboard.sh"; do
   if [ -x "$f" ]; then ok; else bad "executable-${f#$ROOT/}" "not executable — './${f#$ROOT/}' would fail"; fi
 done
 # A team plugin's skills and its doctor run its scripts by path: fe's named ones keep their bit, and

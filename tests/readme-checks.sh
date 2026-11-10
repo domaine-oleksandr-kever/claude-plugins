@@ -830,5 +830,17 @@ has "$ROOT/plugins/base/references/shopify-sidekick-relay.md" 'Reply with only o
 has "$ROOT/plugins/base/README.md" '| `references/shopify-sidekick-relay.md` |' base-readme-sidekick-reference-row
 has "$ROOT/plugins/fe/references/store-auth-troubleshooting.md" 'Sidekick relay' fe-store-auth-sidekick-pointer
 
+# the relay prompt goes to the clipboard: the skill may run clipboard.sh, the protocol names it, the switch is documented
+has "$ROOT/plugins/base/skills/shopify/SKILL.md" 'Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/clipboard.sh*)' base-shopify-allowed-clipboard
+has "$ROOT/plugins/base/references/shopify-sidekick-relay.md" 'bash ${CLAUDE_PLUGIN_ROOT}/scripts/clipboard.sh --file' base-sidekick-clipboard
+has "$ROOT/plugins/base/references/shopify-sidekick-relay.md" 'https://admin.shopify.com/store/' base-sidekick-admin-link
+has "$ROOT/plugins/base/README.md" '| `BASE_CLIPBOARD` |' base-readme-clipboard-switch
+
+# no API row holds: one store-route question per store, its answer remembered in notes.md
+if grep -E '^allowed-tools:' "$ROOT/plugins/base/skills/shopify/SKILL.md" | grep -qF 'AskUserQuestion'; then ok; else bad base-shopify-allowed-askuserquestion "allowed-tools in plugins/base/skills/shopify/SKILL.md lacks 'AskUserQuestion'"; fi
+has "$ROOT/plugins/base/skills/shopify/SKILL.md" 'store-route:' base-shopify-store-route
+has "$ROOT/plugins/base/skills/shopify/SKILL.md" '(Recommended)' base-shopify-store-route-recommended
+has "$ROOT/plugins/base/references/shopify-sidekick-relay.md" 'store-route:' base-sidekick-store-route
+
 echo "readme-checks: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi
