@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { ATTRIBUTION_DENY, carriesAttribution } from '../guards/attribution.ts'
 import { NO_VERIFY_FALLBACK } from '../guards/bash.ts'
-import { JIRA_WRITES, NOTION_WRITES, scopeRefusal, splitTool, twinServers, writeRefusal } from '../guards/mcp.ts'
+import { JIRA_WRITES, NOTION_WRITES, V1_RENAMES, aliases, scopeRefusal, splitTool, twinServers, v2Name, writeRefusal } from '../guards/mcp.ts'
 import { DENY_FALLBACK, guardNote } from '../guards/scratch.ts'
 import { NOW, PEEK, SLIM_VIEW, eventsOf, peek, ran, start, world } from './world.ts'
 
@@ -290,7 +290,7 @@ const agents = (w: any, map: Record<string, string>, dir = DIR) => {
   for (const [id, type] of Object.entries(map)) w.files[`${dir}/${id}.json`] = { text: type.startsWith('!') ? type.slice(1) : JSON.stringify(type), mtimeMs: 0 }
 }
 const PRECEDENCE = `${OWN_GET}: ${TWIN_GET} serves the same tool and takes precedence — call ${TWIN_GET} instead; if that fails, call ${OWN_GET} again (it is allowed after this one refusal)`
-const UNKNOWN = (tool: string) => `base: ${tool} refused: no agent-type marker for this subagent, so it gets no Jira, Confluence or Notion write tool`
+const UNKNOWN = (tool: string) => `base: ${tool} refused: no agent-type marker for this subagent, so it gets no Atlassian or Notion write tool`
 
 describe('MCP guard: helpers', () => {
   test('splitTool: server and tool, the last __ splits', () => {
@@ -317,13 +317,40 @@ describe('MCP guard: helpers', () => {
       expect(writeRefusal('base:bug-hunter', tool, 'f')).toBeNull()
     }
     expect(writeRefusal('base:jira-writer', 'editJiraIssue', 'f')).toBeNull()
-    expect(writeRefusal('base:jira-writer', 'addCommentToJiraIssue', 'f')).toBeNull()
+    expect(writeRefusal('base:jira-writer', 'addOrEditJiraIssueComment', 'f')).toBeNull()
     expect(writeRefusal('base:jira-writer', 'transitionJiraIssue', 'mcp__X__transitionJiraIssue')).toBe(
-      'base: base:jira-writer writes only with editJiraIssue or addCommentToJiraIssue — mcp__X__transitionJiraIssue refused',
+      'base: base:jira-writer writes only with editJiraIssue or addOrEditJiraIssueComment — mcp__X__transitionJiraIssue refused',
     )
+    for (const tool of ['executeWrite', 'executeDestructive', 'createConfluenceComment', 'uploadAttachmentToJiraIssue']) {
+      expect(writeRefusal('base:jira-writer', tool, 'f')).toContain('writes only with')
+    }
     expect(writeRefusal('base:jira-writer', 'notion-create-pages', 'f')).not.toBeNull()
     expect(writeRefusal(null, 'getJiraIssue', 'f')).toBeNull()
     expect(writeRefusal('base:jira-reader', 'notion-fetch', 'f')).toBeNull()
+    for (const tool of ['executeRead', 'discover', 'getConfluenceContent', 'listJiraIssueComments']) expect(writeRefusal('base:jira-reader', tool, 'f')).toBeNull()
+  })
+
+  test("writeRefusal: a v1 server's write names count as their v2 tools, its reads stay reads", () => {
+    for (const [v1, v2] of Object.entries(V1_RENAMES)) {
+      const write = JIRA_WRITES.includes(v2)
+      expect(writeRefusal('base:jira-reader', v1, 'f') !== null).toBe(write)
+      expect(writeRefusal(null, v1, 'f') !== null).toBe(write)
+    }
+    expect(writeRefusal('base:jira-writer', 'addCommentToJiraIssue', 'f')).toBeNull()
+    expect(writeRefusal('base:jira-writer', 'createConfluencePage', 'f')).toContain('writes only with')
+    expect(writeRefusal('base:jira-reader', 'getConfluencePage', 'f')).toBeNull()
+  })
+
+  test('v2Name and aliases: one name per tool across the two Atlassian generations; a 2:1 rename is no alias', () => {
+    expect(v2Name('addCommentToJiraIssue')).toBe('addOrEditJiraIssueComment')
+    expect(v2Name('getJiraIssue')).toBe('getJiraIssue')
+    expect(aliases('addOrEditJiraIssueComment')).toEqual(['addOrEditJiraIssueComment', 'addCommentToJiraIssue'])
+    expect(aliases('addCommentToJiraIssue')).toEqual(['addCommentToJiraIssue', 'addOrEditJiraIssueComment'])
+    expect(aliases('createConfluenceComment')).toEqual(['createConfluenceComment'])
+    expect(aliases('createConfluenceFooterComment')).toEqual(['createConfluenceFooterComment', 'createConfluenceComment'])
+    expect(aliases('getJiraIssue')).toEqual(['getJiraIssue'])
+    for (const v2 of new Set(Object.values(V1_RENAMES))) expect(V1_RENAMES[v2]).toBeUndefined()
+    expect(new Set(JIRA_WRITES).size).toBe(JIRA_WRITES.length)
   })
 
   test("scopeRefusal: base's reader and writer types reach only a server serving their vendor's tools; other types anything", () => {
@@ -405,6 +432,30 @@ describe('MCP guard: a connector takes precedence', () => {
     expect(calls.below.length).toBe(2)
   })
 
+  t("a twin on the other Atlassian generation counts: base's v2 name against a v1 connector, and the reverse", async ($, on) => {
+    const own = 'mcp__plugin_base_atlassian__addOrEditJiraIssueComment'
+    const old = 'mcp__plugin_base_atlassian__getConfluencePage'
+    const { calls } = world(on, { tools: [...TWIN_TOOLS, own, old, 'mcp__ConnA__addCommentToJiraIssue', 'mcp__ConnA__getConfluenceContent'] })
+    expect((await call($, own)).deny).toBe(
+      `${own}: mcp__ConnA__addCommentToJiraIssue serves the same tool and takes precedence — call mcp__ConnA__addCommentToJiraIssue instead; if that fails, call ${own} again (it is allowed after this one refusal)`,
+    )
+    expect((await call($, old)).deny).toContain('call mcp__ConnA__getConfluenceContent instead')
+    expect((await call($, own)).result).toBe('ok')
+    expect(calls.below.length).toBe(1)
+    expect((await eventsOf($, 'guard')).map(ev => ev.text)).toEqual(['addOrEditJiraIssueComment: ConnA takes precedence', 'getConfluencePage: ConnA takes precedence'])
+  })
+
+  t('the same name on the twin wins over its other-generation name; a 2:1 rename finds no twin', async ($, on) => {
+    const own = 'mcp__plugin_base_atlassian__createConfluenceComment'
+    const { calls } = world(on, {
+      tools: [...TWIN_TOOLS, own, 'mcp__plugin_base_atlassian__addOrEditJiraIssueComment', 'mcp__ConnA__addCommentToJiraIssue',
+        'mcp__ConnA__addOrEditJiraIssueComment', 'mcp__ConnA__createConfluenceFooterComment', 'mcp__ConnA__createConfluenceInlineComment'],
+    })
+    expect((await call($, 'mcp__plugin_base_atlassian__addOrEditJiraIssueComment')).deny).toContain('call mcp__ConnA__addOrEditJiraIssueComment instead')
+    expect((await call($, own)).result).toBe('ok')
+    expect(calls.below.length).toBe(1)
+  })
+
   t('a tool list that fails lets the call run', async ($, on) => {
     const { calls } = world(on, { tools: TWIN_TOOLS, toolsFail: true })
     expect((await call($, OWN_GET)).result).toBe('ok')
@@ -413,19 +464,41 @@ describe('MCP guard: a connector takes precedence', () => {
 })
 
 describe('MCP guard: subagents', () => {
-  t('a reader is refused every Jira, Confluence and Notion write on any server; its reads run', async ($, on) => {
+  t('a reader is refused every Atlassian and Notion write on any server; its reads run', async ($, on) => {
     const { w, calls } = world(on, { env: { HOME }, tools: TWIN_TOOLS })
     agents(w, { a1: 'base:jira-reader', a2: 'base:doc-reader', a3: 'base:figma-reader' })
-    expect(await call($, 'mcp__ConnA__editJiraIssue', 'a1')).toEqual({ deny: 'base: base:jira-reader is read-only toward Jira, Confluence and Notion — mcp__ConnA__editJiraIssue refused' })
+    expect(await call($, 'mcp__ConnA__editJiraIssue', 'a1')).toEqual({ deny: 'base: base:jira-reader is read-only toward Atlassian and Notion — mcp__ConnA__editJiraIssue refused' })
     expect((await call($, 'mcp__ConnN__notion-update-page', 'a2')).deny).toContain('base: base:doc-reader is read-only')
-    expect((await call($, `${KIT}x__createConfluencePage`, 'a3')).deny).toContain('base: base:figma-reader is read-only')
+    expect((await call($, `${KIT}x__createConfluenceContent`, 'a3')).deny).toContain('base: base:figma-reader is read-only')
+    expect((await call($, 'mcp__ConnA__createConfluencePage', 'a2')).deny).toContain('base: base:doc-reader is read-only')
+    expect((await call($, 'mcp__ConnA__executeWrite', 'a1')).deny).toContain('base: base:jira-reader is read-only')
     expect((await call($, TWIN_GET, 'a1')).result).toBe('ok')
-    expect(calls.below.length).toBe(1)
+    expect((await call($, 'mcp__ConnA__executeRead', 'a1')).result).toBe('ok')
+    expect(calls.below.length).toBe(2)
     expect((await eventsOf($, 'guard')).map(ev => ev.text)).toEqual([
       'editJiraIssue: base:jira-reader may not write',
       'notion-update-page: base:doc-reader may not write',
-      'createConfluencePage: base:figma-reader may not write',
+      'createConfluenceContent: base:figma-reader may not write',
+      'createConfluencePage: base:doc-reader may not write',
+      'executeWrite: base:jira-reader may not write',
     ])
+  })
+
+  t("the readers, the writer and an unknown type are refused the other Atlassian products' writes on base's own server; their reads run", async ($, on) => {
+    const { w } = world(on, { env: { HOME }, tools: TWIN_TOOLS })
+    agents(w, { a1: 'base:jira-reader', a2: 'base:doc-reader', a3: 'base:jira-writer' })
+    const writes = ['mergeBitbucketRepoPullRequest', 'createBitbucketRepoCommit', 'addTeamworkGraphContext', 'shareLoomObject', 'publishLoomObject',
+      'createGoal', 'createProjectUpdate', 'createTeam', 'updateFocusArea', 'createTalentSkill', 'updateCapacityPlanAllocation',
+      'updateCapacityPlanAllocations', 'updateJiraAlignItem']
+    for (const tool of writes) {
+      const full = `mcp__plugin_base_atlassian__${tool}`
+      expect((await call($, full, 'a1')).deny).toBe(`base: base:jira-reader is read-only toward Atlassian and Notion — ${full} refused`)
+      expect((await call($, full, 'a2')).deny).toContain('base: base:doc-reader is read-only')
+      expect((await call($, full, 'a3')).deny).toContain('base: base:jira-writer writes only with')
+      expect((await call($, full, 'a9')).deny).toBe(UNKNOWN(full))
+    }
+    expect((await call($, 'mcp__plugin_base_atlassian__getBitbucketRepoPullRequest', 'a1')).result).toBe('ok')
+    expect((await call($, 'mcp__plugin_base_atlassian__getBitbucketRepoPullRequest', 'a3')).result).toBe('ok')
   })
 
   t("a reader or the writer calling a server out of its scope is refused; another type is not", async ($, on) => {
@@ -443,8 +516,10 @@ describe('MCP guard: subagents', () => {
     const { w } = world(on, { env: { HOME }, tools: TWIN_TOOLS })
     agents(w, { a2: 'base:jira-writer' })
     expect((await call($, 'mcp__ConnA__editJiraIssue', 'a2')).result).toBe('ok')
+    expect((await call($, 'mcp__ConnA__addOrEditJiraIssueComment', 'a2')).result).toBe('ok')
     expect((await call($, 'mcp__ConnA__addCommentToJiraIssue', 'a2')).result).toBe('ok')
     expect((await call($, 'mcp__ConnA__transitionJiraIssue', 'a2')).deny).toContain('base: base:jira-writer writes only with')
+    expect((await call($, 'mcp__ConnA__executeWrite', 'a2')).deny).toContain('base: base:jira-writer writes only with')
     expect((await call($, 'mcp__ConnN__notion-create-pages', 'a2')).deny).toContain('base: base:jira-writer writes only with')
   })
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # jira-attachments.sh — download a Jira issue's image/video/text attachments into the task workspace.
 #
-# WHY A SCRIPT AT ALL: the Atlassian MCP server returns attachment METADATA (id, filename,
-# mimeType, size) and no tool that returns the BYTES, so a screenshot on a ticket is invisible to
-# the model. This fetches them with curl and leaves them on disk for slim's `view` tool to resize.
+# WHY A SCRIPT AT ALL: base reads attachment METADATA (id, filename, mimeType, size) through the
+# Atlassian MCP but not the BYTES (the v2 server's downloadJiraIssueAttachment is not used yet), so a
+# screenshot on a ticket is invisible to the model. This fetches them with curl and leaves them on
+# disk for slim's `view` tool to resize.
 #
 # CREDENTIALS — a per-developer, READ-ONLY SCOPED API token, never a classic one:
 #   JIRA_EMAIL + JIRA_API_TOKEN, process env first, else the --env dotenv (default ./.env if present, else <git toplevel>/.env,

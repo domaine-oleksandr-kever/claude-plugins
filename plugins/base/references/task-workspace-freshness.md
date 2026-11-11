@@ -54,7 +54,8 @@ resuming an interrupted conversation.
   `notion-search` the stored `title` (small `page_size`, `max_highlight_length: 0`),
   match the result to the page id embedded in the stored `url`, read its `timestamp`: a
   **day**-granular last-edited date (covers connected Google-Drive docs too);
-  **Confluence**: `searchConfluenceUsingCql` with `cql: "id=<pageId>"` → precise
+  **Confluence**: `searchConfluence` (`searchConfluenceUsingCql` on a server still on
+  Atlassian's v1) with `cql: "id=<pageId>"` → precise
   `lastModified`. Probe date ≤ stored `last_edited` / `fetched_at` date → fresh: stamp
   `verified_at`; newer → re-fetch, re-extract, overwrite. Same-day edits (day
   granularity) and plain-web links (no probe): ask, as with `figma-*.md`. When the extract's

@@ -286,6 +286,39 @@ describe('/base-doctor', () => {
     expect(out.findIndex(l => l.includes('connectors'))).toBe(out.findIndex(l => l.includes('mcp:playwright')) + 1)
   })
 
+  t("Atlassian v1 tools: base's own server warns to restart and sign in, a v1 connector warns to re-add it; v2 names pass", async ($, on) => {
+    world(on, {
+      manifest: manifest(['atlassian']),
+      mcp: { atlassian: up('atlassian') },
+      tools: [
+        'mcp__plugin_base_atlassian__getJiraIssue', 'mcp__plugin_base_atlassian__addCommentToJiraIssue',
+        'mcp__ConnA__getJiraIssue', 'mcp__ConnA__addCommentToJiraIssue', 'mcp__ConnB__getJiraIssue', 'mcp__ConnB__addOrEditJiraIssueComment',
+      ],
+      run: () => ran(0, staticOut(GREEN)),
+    })
+    await start($)
+    const out = lines((await doctor($)).text)
+    expect(out).toContain(
+      'WARN  mcp:atlassian  connected as plugin:base:atlassian, but it lists the Atlassian v1 tools (removed 2027-03-01) — restart Claude Code, then sign in to it again through /mcp — ConnA, ConnB serves the same tools and takes precedence',
+    )
+    expect(out).toContain(
+      "WARN  connectors     Atlassian: ConnA, ConnB — ConnA: it lists the Atlassian v1 tools (removed 2027-03-01); remove the connector and add it again from Claude's connector directory",
+    )
+  })
+
+  t('Atlassian v2 names everywhere: both rows pass', async ($, on) => {
+    world(on, {
+      manifest: manifest(['atlassian']),
+      mcp: { atlassian: up('atlassian') },
+      tools: ['mcp__plugin_base_atlassian__getJiraIssue', 'mcp__plugin_base_atlassian__addOrEditJiraIssueComment', 'mcp__ConnB__getJiraIssue', 'mcp__ConnB__addOrEditJiraIssueComment'],
+      run: () => ran(0, staticOut(GREEN)),
+    })
+    await start($)
+    const out = lines((await doctor($)).text)
+    expect(out).toContain('PASS  mcp:atlassian  connected as plugin:base:atlassian — ConnB takes precedence')
+    expect(out).toContain('PASS  connectors     Atlassian: ConnB')
+  })
+
   t('the tool list fails → the connectors row skips, the server rows stand', async ($, on) => {
     world(on, { manifest: manifest(['atlassian']), mcp: { atlassian: up('atlassian') }, toolsFail: true, run: () => ran(0, staticOut(GREEN)) })
     await start($)

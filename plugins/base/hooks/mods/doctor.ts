@@ -9,7 +9,7 @@ import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent, spareRoot } fro
 import type { Disk } from './events.ts'
 import { SLIM_MISSING, SLIM_VIEW } from './session.ts'
 import { WINDOW_DAYS, dogfoodMode, enabledNames, loginAccount, loginFile, recent, seen } from './dogfood/text.ts'
-import { SIGNATURE, twinServers } from './guards/mcp.ts'
+import { SIGNATURE, onV1, twinServers } from './guards/mcp.ts'
 
 export const COMMAND = {
   name: 'base-doctor',
@@ -217,9 +217,18 @@ async function defectRows($: $): Promise<Row[]> {
   }
 }
 
-/** The connection row, naming the servers that are no plugin's and serve the same tools: they take precedence. */
+/** The doctor's words for a server that still lists the Atlassian v1 tools. */
+const V1_HINT = 'it lists the Atlassian v1 tools (removed 2027-03-01)'
+
+/**
+ * The connection row, naming the servers that are no plugin's and serve the same tools: they take precedence. base's
+ * own Atlassian server still listing v1 tools is a session started before the v2 endpoint: it warns.
+ */
 async function connectRow($: $, server: string, names: readonly string[]): Promise<Row> {
-  const row = await connect($, server)
+  let row = await connect($, server)
+  if (server === 'atlassian' && row.status === 'PASS' && onV1(names, 'plugin_base_atlassian')) {
+    row = { status: 'WARN', name: row.name, detail: `${row.detail}, but ${V1_HINT} — restart Claude Code, then sign in to it again through /mcp` }
+  }
   const twins = twinServers(names, server).join(', ')
   if (!twins) return row
   return row.status === 'PASS'
@@ -227,15 +236,18 @@ async function connectRow($: $, server: string, names: readonly string[]): Promi
     : { status: 'WARN', name: row.name, detail: `${row.detail} — ${twins} serves the same tools and takes precedence` }
 }
 
-/** The connectors serving what base's own Atlassian, Notion and Figma servers serve. */
+/** The connectors serving what base's own Atlassian, Notion and Figma servers serve; an Atlassian one on v1 warns. */
 function connectorsRow(names: readonly string[] | null): Row {
   if (names === null) return { status: 'SKIP', name: 'connectors', detail: 'the tool list did not answer' }
+  const old = twinServers(names, 'atlassian').filter(s => onV1(names, s))
   const found = Object.entries(SIGNATURE)
     .map(([server, [, vendor]]) => [vendor, twinServers(names, server).join(', ')] as const)
     .filter(([, twins]) => twins)
-  return found.length
-    ? { status: 'PASS', name: 'connectors', detail: found.map(([vendor, twins]) => `${vendor}: ${twins}`).join('; ') }
-    : { status: 'SKIP', name: 'connectors', detail: "none attached — base's own servers serve Jira, Notion and Figma" }
+  if (!found.length) return { status: 'SKIP', name: 'connectors', detail: "none attached — base's own servers serve Jira, Notion and Figma" }
+  const detail = found.map(([vendor, twins]) => `${vendor}: ${twins}`).join('; ')
+  return old.length
+    ? { status: 'WARN', name: 'connectors', detail: `${detail} — ${old.join(', ')}: ${V1_HINT}; remove the connector and add it again from Claude's connector directory` }
+    : { status: 'PASS', name: 'connectors', detail }
 }
 
 async function connect($: $, server: string): Promise<Row> {

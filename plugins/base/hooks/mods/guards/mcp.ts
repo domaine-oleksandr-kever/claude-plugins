@@ -1,5 +1,5 @@
 // The MCP guards in one tool.call hook, server-agnostic. A subagent of base's reader or writer types calls MCP tools
-// only on a server serving its vendor's tools, and a Jira, Confluence or Notion write only when its type allows it (an
+// only on a server serving its vendor's tools, and an Atlassian or Notion write only when its type allows it (an
 // unknown type gets none). A server other than a plugin's that serves the same tools as one of base's own takes
 // precedence: base's tool is refused once per session, then allowed. Storefront login code in a browser MCP's code tool
 // on any server is refused once per session, then allowed (./login.ts). Each deny writes one `guard` event.
@@ -10,12 +10,68 @@ import { logDir, logLine, pushEvent, spareRoot } from '../events.ts'
 import type { Disk } from '../events.ts'
 import { LOGIN_TOOLS, isLoginCall, loginDenyText } from './login.ts'
 
-/** The write tools by tool name on any server; tests/base-refs-lint.sh reads both lists from this file. */
+/**
+ * The write tools of the Atlassian MCP v2 by tool name on any server: every write_* and delete_* group of Atlassian's
+ * supported-tools page (Jira, JSM, Confluence, Bitbucket, Teamwork Graph, Loom, Goals, Projects, Teams, Focus, Talent,
+ * Capacity Planning, Jira Align), manage_jira's writes, and the two tools that run a deferred write. The two pages of
+ * that list spell one tool updateCapacityPlanAllocation(s): both are here. tests/base-refs-lint.sh reads this list and
+ * NOTION_WRITES from this file.
+ */
 export const JIRA_WRITES = [
-  'editJiraIssue', 'addCommentToJiraIssue', 'transitionJiraIssue', 'createJiraIssue', 'createIssueLink',
-  'addWorklogToJiraIssue', 'createConfluencePage', 'updateConfluencePage', 'createConfluenceFooterComment',
-  'createConfluenceInlineComment',
+  'createJiraIssue', 'editJiraIssue', 'transitionJiraIssue', 'addOrEditJiraIssueComment', 'addOrEditJiraIssueWorklog',
+  'createJiraIssueLink', 'manageJiraProjectVersion', 'manageJiraProjectVersionRelatedWork', 'manageJiraSprint',
+  'createJiraBoard', 'watchJiraIssue', 'uploadAttachmentToJiraIssue', 'editJiraEntityProperty',
+  'createJiraIssueRemoteIssueLink', 'convertJiraIssueHierarchy', 'deleteJiraIssue', 'deleteJiraComment',
+  'deleteJiraIssueAttachment', 'createJiraProject', 'updateJiraProject', 'updateJiraScreen', 'updateJsmOpsAlert',
+  'approveJsmRequestResolverPlans', 'transitionJsmRequest', 'createJsmRequest', 'decideJsmRequestApproval',
+  'setJsmAgentAvailability', 'createConfluenceContent', 'updateConfluenceContent', 'createConfluenceSpace',
+  'setConfluenceSpaceInstructions', 'copyConfluenceContent', 'moveConfluenceContent', 'archiveConfluenceContent',
+  'unarchiveConfluenceContent', 'restoreConfluenceContentVersion', 'convertConfluenceContentMode',
+  'setConfluenceContentStatus', 'createConfluenceComment', 'updateConfluenceComment', 'updateConfluenceCommentResolution',
+  'addConfluenceContentSuggestions', 'createConfluenceAttachment', 'addLabelsToConfluenceContent', 'addConfluenceReaction',
+  'addConfluenceContentPermissions', 'removeConfluenceContentPermissions', 'replaceConfluenceContentPermissions',
+  'setConfluenceContentRestrictionState', 'enableConfluencePublicLink', 'disableConfluencePublicLink',
+  'completeConfluenceTask', 'reopenConfluenceTask', 'starConfluenceContent', 'unstarConfluenceContent',
+  'starConfluenceSpace', 'unstarConfluenceSpace', 'watchConfluenceContent', 'unwatchConfluenceContent',
+  'watchConfluenceSpace', 'unwatchConfluenceSpace', 'watchConfluenceLabel', 'unwatchConfluenceLabel',
+  'createConfluenceInfographicForPage', 'editConfluenceInfographicForPage', 'createConfluenceMauiApp',
+  'editConfluenceMauiApp', 'createBitbucketRepoPullRequest', 'updateBitbucketRepoPullRequest',
+  'mergeBitbucketRepoPullRequest', 'approveBitbucketRepoPullRequest', 'requestChangesOnBitbucketRepoPullRequest',
+  'addBitbucketRepoPullRequestComment', 'resolveBitbucketRepoPullRequestComment', 'reopenBitbucketRepoPullRequestComment',
+  'createBitbucketRepoPullRequestTask', 'setBitbucketRepoPullRequestTaskState', 'createBitbucketRepoBranch',
+  'createBitbucketRepoCommit', 'runBitbucketRepoPipeline', 'addTeamworkGraphContext', 'addLoomInteraction',
+  'updateLoomObjectMetadata', 'updateLoomObjectVisibility', 'shareLoomObject', 'createLoomObjectUpload',
+  'publishLoomObject', 'createLoomObjectFolder', 'moveLoomObjectToFolder', 'recoverLoomVideo', 'createGoal',
+  'createGoalUpdate', 'addConnectionsToGoals', 'createProject', 'createProjectUpdate', 'addConnectionsToProjects',
+  'createTeam', 'updateTeam', 'createFocusArea', 'updateFocusArea', 'createFocusAreaStatusUpdate', 'linkToFocusArea',
+  'createTalentSkill', 'updateTalentWorkerSkillMappings', 'updateTalentPositionFocusAreaMappings',
+  'updateCapacityPlanAllocation', 'updateCapacityPlanAllocations', 'createCapacityPlanNonProjectWork',
+  'updateCapacityPlanNonProjectWork', 'createJiraAlignItem', 'updateJiraAlignItem', 'executeWrite', 'executeDestructive',
 ]
+/**
+ * Atlassian MCP v1 tool name → its v2 name, for a server still on v1 (Atlassian removes v1 on 2027-03-01): the guards
+ * treat both names as one tool. Two v1 names mapping to one v2 name count as that tool for the writes, never as a twin.
+ */
+export const V1_RENAMES: Readonly<Record<string, string>> = {
+  addCommentToJiraIssue: 'addOrEditJiraIssueComment',
+  addWorklogToJiraIssue: 'addOrEditJiraIssueWorklog',
+  createIssueLink: 'createJiraIssueLink',
+  getJiraIssueRemoteIssueLinks: 'listJiraIssueRemoteIssueLinks',
+  getTransitionsForJiraIssue: 'listJiraIssueTransitions',
+  getVisibleJiraProjects: 'listJiraProjects',
+  getJiraProjectIssueTypesMetadata: 'listJiraProjectIssueTypesMetadata',
+  getIssueLinkTypes: 'listJiraIssueLinkTypes',
+  getConfluencePage: 'getConfluenceContent',
+  getConfluenceSpaces: 'listConfluenceSpaces',
+  getPagesInConfluenceSpace: 'listConfluenceContent',
+  getConfluencePageFooterComments: 'listConfluenceComments',
+  getConfluencePageInlineComments: 'listConfluenceComments',
+  searchConfluenceUsingCql: 'searchConfluence',
+  createConfluencePage: 'createConfluenceContent',
+  updateConfluencePage: 'updateConfluenceContent',
+  createConfluenceFooterComment: 'createConfluenceComment',
+  createConfluenceInlineComment: 'createConfluenceComment',
+}
 export const NOTION_WRITES = [
   'notion-create-pages', 'notion-update-page', 'notion-create-comment', 'notion-move-pages', 'notion-duplicate-page',
   'notion-create-database', 'notion-update-data-source', 'notion-create-view', 'notion-update-view',
@@ -38,7 +94,7 @@ const SCOPE: Record<string, readonly string[]> = {
 }
 const READERS = new Set(['base:jira-reader', 'base:doc-reader', 'base:figma-reader'])
 const WRITER = 'base:jira-writer'
-const WRITER_TOOLS = new Set(['editJiraIssue', 'addCommentToJiraIssue'])
+const WRITER_TOOLS = new Set(['editJiraIssue', 'addOrEditJiraIssueComment'])
 const OWN = 'plugin_base_'
 const SOFT_CAP = 200
 /** The `mcpSoft` entry that marks this session's storefront-login refusal: no tool name has a space. */
@@ -48,6 +104,20 @@ const soft = atom({ plugin: 'base', key: 'mcpSoft' } as const, { sid: '', tools:
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
 
 type $ = EngineInterface
+
+/** `tool`'s v2 name: its V1_RENAMES entry, else itself. */
+export const v2Name = (tool: string): string => V1_RENAMES[tool] ?? tool
+
+/** The names a twin server may list `tool` under: itself, then its name of the other Atlassian generation when one maps 1:1. */
+export function aliases(tool: string): string[] {
+  const back = Object.keys(V1_RENAMES).filter(k => V1_RENAMES[k] === tool)
+  return [tool, ...(tool in V1_RENAMES ? [V1_RENAMES[tool]] : []), ...(back.length === 1 ? back : [])]
+}
+
+/** True when `names` list a tool of `server` under an Atlassian v1 name that v2 renamed: that server still speaks v1. */
+export function onV1(names: readonly string[], server: string): boolean {
+  return Object.keys(V1_RENAMES).some(t => names.includes(`mcp__${server}__${t}`))
+}
 
 /** `mcp__<server>__<tool>` → its server and tool; null for any other name. */
 export function splitTool(name: string): { server: string; tool: string } | null {
@@ -72,10 +142,10 @@ export function twinServers(names: readonly string[], server: string): string[] 
 
 /** Why an agent of `type` (null = no marker entry) may not call the write tool `tool`; null when it may. */
 export function writeRefusal(type: string | null, tool: string, full: string): string | null {
-  if (!WRITES.has(tool)) return null
-  if (type === null) return `base: ${full} refused: no agent-type marker for this subagent, so it gets no Jira, Confluence or Notion write tool`
-  if (READERS.has(type)) return `base: ${type} is read-only toward Jira, Confluence and Notion — ${full} refused`
-  if (type === WRITER && !WRITER_TOOLS.has(tool)) return `base: ${type} writes only with editJiraIssue or addCommentToJiraIssue — ${full} refused`
+  if (!WRITES.has(v2Name(tool))) return null
+  if (type === null) return `base: ${full} refused: no agent-type marker for this subagent, so it gets no Atlassian or Notion write tool`
+  if (READERS.has(type)) return `base: ${type} is read-only toward Atlassian and Notion — ${full} refused`
+  if (type === WRITER && !WRITER_TOOLS.has(v2Name(tool))) return `base: ${type} writes only with editJiraIssue or addOrEditJiraIssueComment — ${full} refused`
   return null
 }
 
@@ -152,11 +222,22 @@ async function firstRefusal($: $, key: string): Promise<boolean> {
   return fresh
 }
 
-/** The one refusal per session of base's own `full` while another server serves the same tools; null when none applies. */
+/**
+ * The one refusal per session of base's own `full` while another server serves the same tool (under either Atlassian
+ * generation's name); null when none applies.
+ */
 async function precedence($: $, full: string, name: { server: string; tool: string }, names: readonly string[]): Promise<string | null> {
-  const twin = twinServers(names, name.server.slice(OWN.length)).find(s => names.includes(`mcp__${s}__${name.tool}`))
-  if (!twin || !(await firstRefusal($, full))) return null
-  const other = `mcp__${twin}__${name.tool}`
+  let other = ''
+  let twin = ''
+  for (const s of twinServers(names, name.server.slice(OWN.length))) {
+    const tool = aliases(name.tool).find(t => names.includes(`mcp__${s}__${t}`))
+    if (tool) {
+      other = `mcp__${s}__${tool}`
+      twin = s
+      break
+    }
+  }
+  if (!other || !(await firstRefusal($, full))) return null
   await logGuard($, `${name.tool}: ${twin} takes precedence`)
   return `${full}: ${other} serves the same tool and takes precedence — call ${other} instead; if that fails, call ${full} again (it is allowed after this one refusal)`
 }

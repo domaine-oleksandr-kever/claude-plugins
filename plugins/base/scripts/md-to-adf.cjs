@@ -6,7 +6,7 @@
  * Assumptions, Documentation Links) store ADF, not Markdown. The Jira write-back skills
  * run the APPROVED markdown through this script and pass the resulting ADF object to
  * editJiraIssue — so content renders correctly instead of showing literal `#`/`*`/`|`.
- * Comments take the same output serialized as a string (addCommentToJiraIssue with
+ * Comments take the same output serialized as a string (addOrEditJiraIssueComment with
  * contentFormat "adf"): the MCP's own markdown path leaves bare URLs inert. Dependency-free
  * (Node only); deterministic, so the model never hand-builds ADF JSON.
  *

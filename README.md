@@ -1103,7 +1103,7 @@ All of them keep heavy or noisy work out of the main context:
   bytes out of context (see "Jira comments + attachments").
 - **`jira-writer`** — the write-side mirror. It writes one **approved** value with a single
   call: a rich-text custom field through `editJiraIssue`, or a comment through
-  `addCommentToJiraIssue` (`contentFormat: "adf"`). It converts the markdown to ADF first. So the
+  `addOrEditJiraIssueComment` (`contentFormat: "adf"`). It converts the markdown to ADF first. So the
   large payload stays in its disposable context, not in the main loop. Writer skills delegate to
   it **after** the ✋ approval. The gate stays in the skill, and the agent never authorizes.
 - **`figma-reader`** — reads **one** Figma frame and returns a compact build spec. It picks its
@@ -2575,7 +2575,7 @@ We made two decisions on purpose. We record them here, so that they do not look 
   Reads keep working under any scope, and a name that does not exist on this install does
   nothing. The prompt contract still holds. The three readers stay read-only toward their sources,
   and each writes only its own workspace file. `jira-writer` keeps exactly one approved write
-  (`editJiraIssue` / `addCommentToJiraIssue`) plus its read-back. Their `Bash` is only for the
+  (`editJiraIssue` / `addOrEditJiraIssueComment`) plus its read-back. Their `Bash` is only for the
   bundled scripts: `adf-to-md.cjs`, `json-slim.cjs` and, for `jira-reader`, `jira-attachments.sh`.
   This script brings a ticket's images to disk, so the agent does not run `curl` or `ffmpeg`
   itself. They also run one `date -u +%FT%TZ` for the `fetched_at` stamp of the workspace file.

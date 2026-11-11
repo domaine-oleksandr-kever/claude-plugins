@@ -17,7 +17,7 @@ live `names` map — never copy it into skills or agents.
 | Documentation Links | `customfield_10047`      |
 
 Request shape — every Jira **issue** tool (`getJiraIssue`, `editJiraIssue`,
-`addCommentToJiraIssue`) requires **`cloudId`**. On a **read**, also **always include
+`addOrEditJiraIssueComment`) requires **`cloudId`**. On a **read**, also **always include
 `expand: "names"`** (only `getJiraIssue` takes it; it tells "empty" from "wrong ID"):
 
 ```

@@ -9,7 +9,7 @@ plugin's Technical Approach or Steps to test writer (`/fe:write-technical-approa
 `/fe:write-steps-to-test`) and any QA write (`/fe:qa-feature-or-fix`). **Description** is a *standard* field and may accept markdown,
 but we send it as ADF too — one path, one converter.
 
-**Comments go through the same converter.** `addCommentToJiraIssue` does accept markdown
+**Comments go through the same converter.** `addOrEditJiraIssueComment` does accept markdown
 (`contentFormat: "markdown"`), but the MCP's own conversion leaves a bare URL as inert,
 unclickable text and backslash-escapes the `_` in its query string (a preview URL
 comes out as `?\_ab=0&\_fd=0`). So convert, then pass the ADF as a JSON **string** —
@@ -162,7 +162,7 @@ comment posted as markdown loses its bare URLs. Keep the ADF small instead:
 **Call shape:** `editJiraIssue` with `cloudId: "meetdomaine.atlassian.net"`,
 `issueIdOrKey: "<KEY>"`, `fields: { "<customfield_id>": <ADF doc object> }` — field IDs
 live in `jira-field-ids.md` (their single home; an ID missing from the `names` map → Step B
-in `jira-custom-fields.md`). A **comment**: `addCommentToJiraIssue` with the same `cloudId`
+in `jira-custom-fields.md`). A **comment**: `addOrEditJiraIssueComment` with the same `cloudId`
 and `issueIdOrKey`, `commentBody: "<ADF doc as one JSON string>"`, `contentFormat: "adf"`
 (add `commentId` to update an existing comment).
 

@@ -211,7 +211,7 @@ const DENY = {
   'jira-writer': {
     ...OFF,
     'figma-dev-mode': WHOLE,
-    atlassian: JIRA_WRITES.filter((t) => t !== 'editJiraIssue' && t !== 'addCommentToJiraIssue'),
+    atlassian: JIRA_WRITES.filter((t) => t !== 'editJiraIssue' && t !== 'addOrEditJiraIssueComment'),
     'notion-mcp': NOTION_WRITES,
   },
   'figma-reader': { ...OFF, atlassian: WHOLE, 'notion-mcp': WHOLE },
@@ -294,13 +294,15 @@ Switches: BASE_KNOWN and BASE_UNKNOWN. Links: [ok](../README.md) [gone](missing.
 .claude/base-tmp/playwright is a path, not a command.
 MD
 : > "$FX/scripts/present.sh"
-cat > "$FX/agents/jira-reader.md" <<'MD'
----
-name: jira-reader
-description: a fixture reader with a gap in its denylist
-disallowedTools: Edit, mcp__plugin_kore_atlassian__editJiraIssue, mcp__plugin_base_atlassian__addCommentToJiraIssue, mcp__plugin_base_atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__createJiraIssue, mcp__plugin_base_atlassian__createIssueLink, mcp__plugin_base_atlassian__addWorklogToJiraIssue, mcp__plugin_base_atlassian__createConfluencePage, mcp__plugin_base_atlassian__updateConfluencePage, mcp__plugin_base_atlassian__createConfluenceFooterComment, mcp__plugin_base_atlassian__createConfluenceInlineComment, mcp__plugin_base_notion-mcp
----
-MD
+# base's Atlassian write list but one tool, each under base's prefix: deny_but <tool>
+deny_but() {
+  "$NODE_BIN" -e 'const s = require("fs").readFileSync(process.argv[1], "utf8");
+    const w = [.../export const JIRA_WRITES = \[([^\]]*)\]/.exec(s)[1].matchAll(/\x27([^\x27]+)\x27/g)].map((m) => m[1]);
+    console.log(w.filter((t) => t !== process.argv[2]).map((t) => "mcp__plugin_base_atlassian__" + t).join(", "));' \
+    "$ROOT/plugins/base/hooks/mods/guards/mcp.ts" "$1"
+}
+printf -- '---\nname: jira-reader\ndescription: a fixture reader with a gap in its denylist\ndisallowedTools: Edit, mcp__plugin_kore_atlassian__editJiraIssue, %s, mcp__plugin_base_notion-mcp\n---\n' \
+  "$(deny_but editJiraIssue)" > "$FX/agents/jira-reader.md"
 cat > "$FX/agents/figma-reader.md" <<'MD'
 ---
 name: figma-reader
@@ -316,14 +318,8 @@ disallowedTools:
   - mcp__plugin_base_playwright
 ---
 MD
-cat > "$FX/agents/doc-reader.md" <<'MD'
----
-name: doc-reader
-description: a fixture reader on an allowlist, one write tool of an allowed server left open
-tools: Read, Write, mcp__plugin_base_atlassian, mcp__slim
-disallowedTools: mcp__plugin_base_atlassian__editJiraIssue, mcp__plugin_base_atlassian__addCommentToJiraIssue, mcp__plugin_base_atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__createJiraIssue, mcp__plugin_base_atlassian__addWorklogToJiraIssue, mcp__plugin_base_atlassian__createConfluencePage, mcp__plugin_base_atlassian__updateConfluencePage, mcp__plugin_base_atlassian__createConfluenceFooterComment, mcp__plugin_base_atlassian__createConfluenceInlineComment
----
-MD
+printf -- '---\nname: doc-reader\ndescription: a fixture reader on an allowlist, one write tool of an allowed server left open\ntools: Read, Write, mcp__plugin_base_atlassian, mcp__slim\ndisallowedTools: %s\n---\n' \
+  "$(deny_but createJiraIssueLink)" > "$FX/agents/doc-reader.md"
 # rule k reads its write lists from base's own MCP guard
 mkdir -p "$FX/hooks/mods/guards"; cp "$ROOT/plugins/base/hooks/mods/guards/mcp.ts" "$FX/hooks/mods/guards/mcp.ts"
 # a team plugin the shared text names, and a line citing it right and wrong
@@ -359,7 +355,8 @@ want k "jira-reader mcp__plugin_base_atlassian__editJiraIssue"
 dont k "jira-reader mcp__plugin_base_atlassian__createJiraIssue"
 dont k "jira-reader mcp__plugin_base_notion-mcp__notion-update-page"
 want k "figma-reader mcp__plugin_base_notion-mcp"; dont k "figma-reader mcp__plugin_base_atlassian"
-want k "doc-reader mcp__plugin_base_atlassian__createIssueLink"
+want k "doc-reader mcp__plugin_base_atlassian__createJiraIssueLink"
+dont k "doc-reader mcp__plugin_base_atlassian__executeWrite";  dont k "jira-reader mcp__plugin_base_atlassian__createConfluenceComment"
 dont k "doc-reader mcp__plugin_base_notion-mcp__notion-update-page"
 dont k "doc-reader Edit";                dont k "jira-reader Edit";  want k "jira-reader NotebookEdit"
 dont k "figma-reader Task";              want k "jira-reader Task"

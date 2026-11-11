@@ -8,7 +8,7 @@ It documents how to locate the ticket fields the workflows depend on:
 
 ## Why this is needed
 
-The default `getJiraIssue` / `fetch` call (even with `responseContentFormat: "markdown"`) returns
+The default `getJiraIssue` call (even with `responseContentFormat: "markdown"`) returns
 only a **narrow default field set** — typically `summary`, `description`, `status`, `assignee`.
 Acceptance Criteria, Assumptions, Technical Approach, Documentation Links, and Steps to test all
 live in **custom fields** that must be **explicitly requested by ID**, or discovered (Step B).
