@@ -123,6 +123,6 @@ Ask if the user wants to:
 
 Each write is an offer, never automatic, and happens only after the user approves the exact text and the target:
 
-- **Confluence or Notion** — the approved brief goes to the space or parent page the user names, through base's Atlassian MCP (`createConfluencePage`) or base's notion MCP (`notion-create-pages`).
+- **Confluence or Notion** — the approved brief goes to the space or parent page the user names, through base's Atlassian MCP (`createConfluenceContent`) or base's notion MCP (`notion-create-pages`).
 - **Jira tickets** — draft every ticket here first (project, issue type, summary, description); after approval, create each with base's Atlassian MCP (`createJiraIssue`), the description converted per `<base root>/references/jira-adf-write.md`. A rich-text field written to an existing ticket goes through `base:jira-writer`.
 - **The merchant version** — chat text the user shares; nothing is sent from here.
