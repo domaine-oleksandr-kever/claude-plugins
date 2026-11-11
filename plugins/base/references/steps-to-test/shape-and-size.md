@@ -35,7 +35,8 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
 - **Absolute storefront and admin hosts only in item 1** — the store host, the Shopify admin host and the
   preview link; every other storefront or admin path stays relative. A third-party admin where QA configures
   something (Talon.One, Fredhopper, an app's own admin) is named by its host in item 3, once, as the start of
-  its route. Never fork per store.
+  its route. Never fork per store. A project rules file's page links in items 2–3 are the one exception
+  (`project-rules.md`).
 - **Banned:** deploy or CI mechanics, storefront passwords, the PR's own preview theme, "works correctly",
   "or similar".
 - **Size.** Target 50–120 words; a one-setting change can be 30. Every sentence is an action or a fact QA

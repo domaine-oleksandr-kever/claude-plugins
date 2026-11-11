@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.22.0**.
+Current release: **base v0.23.0**.
 
 ## Status
 
@@ -117,7 +117,7 @@ that every cited path exists.
 | `references/task-workspace.md`, `references/task-workspace-freshness.md` | the `.claude/tasks/<work-id>/` layout, its read and write rules, `progress.md`, the freshness probes |
 | `references/review-flow.md` | the branch review flow: the `.git/.base-review` marker, which agent runs which check |
 | `references/commit-message-format.md` | Conventional Commits with the house rules |
-| `references/steps-to-test-format.md` | the Steps to Test field's one four-item skeleton (Theme · Object · Setup · Edge cases / not obvious, feature and bug alike) and the theme resolution: what a team plugin's Steps to Test writer writes and `/qa:preflight` reads its setup from — an index; the sections are in `references/steps-to-test/` (templates, item-rules, shape-and-size, theme-resolution, self-check) |
+| `references/steps-to-test-format.md` | the Steps to Test field's one four-item skeleton (Theme · Object · Setup · Edge cases / not obvious, feature and bug alike) and the theme resolution: what a team plugin's Steps to Test writer writes and `/qa:preflight` reads its setup from — an index; the sections are in `references/steps-to-test/` (templates, item-rules, shape-and-size, theme-resolution, self-check, project-rules — a project's local, never committed `.claude/domaine/steps-to-test.md` (this tree's, else the main checkout's from a linked worktree) that sets item 1's environment, store and theme and the page links in items 2–3, the only two places it overrides) |
 | `references/break-it-qa.md` | the break-it QA method: deriving and executing the hostile-value and timing rows of a team plugin's QA and of `/qa:preflight` |
 | `references/responsive-sweep.md` | the responsive sweep before a visual change's result is shown: when it runs, `scripts/responsive-sweep.js`'s calls on the Playwright MCP (one call) and chrome-devtools (`emulate` + evaluate per width), how the table reads and what the report carries |
 | `references/shopify-recipes.md` | `/base:shopify`'s Admin GraphQL recipes, validated on API 2026-10 with their scopes and how to read each answer; the PDP "why does X not show" checklist; the `metafieldsSet` and `productUpdate` templates |

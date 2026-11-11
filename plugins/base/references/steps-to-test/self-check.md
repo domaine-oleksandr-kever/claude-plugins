@@ -14,10 +14,12 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   nowhere else (a third-party admin's host starts its route in item 3, once); the storefront host is always named (unless the store is `unconfirmed: store:`), and only
   the `?preview_theme_id=` link is withheld with the placeholder theme, an unconfirmed id or a Prod store (route form instead); the
   preview link is bare (no code span, no label); the environment and the store never contradict each
-  other.
+  other. With a project rules file: its environment and a listed store only, and with `theme: published`
+  the published theme with no preview link.
 - Item 2 names where the change lives — every page by path, the section / block by its admin label, every
   surface it reaches — and, for a change not visible on screen, the tool, panel and filter, every
-  `DevTools > Network` mention with its filter, every `DevTools > Elements` mention with its attribute or
+  `DevTools > Network` panel mention with its filter (the Network request blocking / conditions drawers are no
+  panel), every `DevTools > Elements` mention with its attribute or
   selector in a code span.
 - Everything the change adds or re-wires has its route and every non-default setting with its value by
   label in item 3, in dependency order; a theme-editor recipe ends with **Save**.
@@ -29,7 +31,8 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
 - Every data need in item 3 is a property list whose counts and values make the changed behaviour
   distinguishable from the unchanged one; a metafield value uses the entry's `Metafields` route; zero catalog handles, titles or "the page that is already
   set up" anywhere in the field (a path in item 2 is a page type, and so is a `/pages/<x>` whose
-  `page.<x>.json` (or `.liquid`) the repo ships, and so is Shopify's built-in `/collections/all`); an entity QA creates is named by its
+  `page.<x>.json` (or `.liquid`) the repo ships, and so is Shopify's built-in `/collections/all`) — except a
+  project rules file's page link on a listed host in items 2–3, next to its property list; an entity QA creates is named by its
   role; every store-wide mutation carries its restore.
 - No invented before: no Prod or other store as a "before"; a theme without the change only when the ticket
   or the developer's answer names it.

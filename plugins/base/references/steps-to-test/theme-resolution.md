@@ -2,7 +2,21 @@
 
 One section of the Steps to Test format; the index is `../steps-to-test-format.md`.
 
-In order, stopping at the first that answers:
+**Project rules** — with a project rules file (`project-rules.md`), it answers item 1 first:
+
+- **Environment** — the file's `environment`; with several, the one the ticket or the developer's answer
+  names.
+- **Store** — the listed store (`stores`) of the ticket's brand and market, with its host. A ticket, `notes.md`
+  or developer answer that names another environment or an unlisted store (a DEV store) conflicts with the
+  project rule: the rule wins, item 1 names the listed store of the same brand, and `unconfirmed: store:` names
+  both facts. Never a DEV store in the field when the file allows UAT only. A brand with no listed store →
+  `unconfirmed: store:`, no host guessed.
+- **Theme** — with `theme: published`: the store's published theme, named as that ("the published theme"; "the
+  theme the TL deploys `develop` to" when the file or `notes.md` says so), opened by the plain storefront
+  host: no theme question, no id, no preview link. Without `theme`, the order below picks the theme, on a
+  listed store only.
+
+Without a project rules file, or with one that has no `theme`, in order, stopping at the first that answers:
 
 1. **The ticket** — a QA theme link or id in the Description, Steps to test, AC or comments, unless it is
    evidently the PR's own preview theme.

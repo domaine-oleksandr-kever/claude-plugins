@@ -19,7 +19,9 @@ admin text; without one, the best human label, listed as `unconfirmed: label:` n
 https://<store>.myshopify.com/?preview_theme_id=<id> as the bare URL, never in a code span or behind a label:
 a code span is not clickable in Jira; a Prod store or an unconfirmed id →
 `Online Store > Themes > <theme> > Preview`, never a preview link — the store's storefront host (and the
-Shopify admin host when it helps) is still named.
+Shopify admin host when it helps) is still named. With a project rules file, item 1 names its environment
+and a listed store only, and with `theme: published` the published theme and the storefront host, no preview
+link (`theme-resolution.md` → **Project rules**).
 Never the PR's own preview theme, never Prod or another store as a "before", and a theme without the change
 only when the ticket or the developer's answer names it (`theme-resolution.md` → **Before state**). With the
 placeholder theme, the store is named as the developer answered or as the ticket names it, with no preview link
@@ -42,7 +44,8 @@ every page type ("the product card in every grid"); different sections or blocks
 by its admin label, however many. **Not visible on screen** — a change in a request, response, dataLayer, cookie or
 console message: name the tool, the panel and the filter (`DevTools > Network, filter "cart", request
 /cart/update.js`); every `DevTools > Network` mention in the field names its filter (`filter Fetch/XHR` for a
-feed or API response, `Img` for image downloads, `Doc` for the page), and an item 3 source that sits under
+feed or API response, `Img` for image downloads, `Doc` for the page; the `More tools > Network request
+blocking` and `Network conditions` drawers are no Network panel and take none), and an item 3 source that sits under
 another filter than item 2's names its own; the expected value stays out (it is the AC). A change in an
 element's attribute or hidden text: name `DevTools > Elements`, the element, and the attribute as the code
 writes it, in a code span; its value only as a shape with placeholders (`aria-label="<n> of <total>"`,
@@ -79,7 +82,9 @@ item 3 data.
   page that is already set up": "a product with 3+ sizes, one sold out", "a collection holding it without
   an enforced filter". A count or value in the list is the smallest that makes the changed behaviour
   distinguishable from the unchanged one (one more than the trimming threshold, 3+ sizes when one is trimmed,
-  a threshold with pence), never the smallest that merely exists. A property inferred from code and not confirmed is listed as
+  a threshold with pence), never the smallest that merely exists. With a project rules file whose `links`
+  is `required` or `optional`, a page link on a listed host follows the property list, never replaces it
+  (`project-rules.md`). A property inferred from code and not confirmed is listed as
   `unconfirmed: data:` in the presentation. A definition is named by owner · **Name** ·
   type and its route `Settings > Custom data > <owner> > Add definition`; a value on an entry by
   `<Owner> > <entry> > Metafields` (`Collections > <the collection> > Metafields`), never the definition route.

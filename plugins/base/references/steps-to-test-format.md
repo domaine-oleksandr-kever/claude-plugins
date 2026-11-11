@@ -13,6 +13,10 @@ structure and mandatory wording.
 
 One skeleton for every issue type: a Bug changes what item 3 holds, not the shape.
 
+A project's local `.claude/domaine/steps-to-test.md` (project rules, never committed) overrides this format in two places only —
+item 1's environment, store and theme, and page links for entities in items 2–3; without that file nothing
+changes.
+
 ## Sections — one file each, under `steps-to-test/`
 
 - [Template](steps-to-test/templates.md) — the four-item skeleton, and how a Bug fills it.
@@ -21,3 +25,5 @@ One skeleton for every issue type: a Bug changes what item 3 holds, not the shap
   every fact from a source, observable words, no repetition, the word target, banned content.
 - [Theme resolution (item 1)](steps-to-test/theme-resolution.md) — which theme item 1 names.
 - [Self-check before presenting](steps-to-test/self-check.md) — the checklist run before the draft is shown.
+- [Project rules](steps-to-test/project-rules.md) — a project's local `.claude/domaine/steps-to-test.md`: how
+  it is found and kept out of git, its keys, what it may override, where a page link comes from.
