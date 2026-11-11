@@ -5,28 +5,46 @@
 //   drafter-check.cjs file stt <path> [--refs <dir>]  steps-to-test.md: the four items as one list; no
 //                                                expectation, old-format text or handle; the preview link
 //                                                bare (no code span, no [label](url)); every DevTools >
-//                                                Network mention names its filter; every DevTools >
+//                                                Network panel mention names its filter (the Network
+//                                                request blocking / conditions drawers are no panel); every DevTools >
 //                                                Elements mention names its attribute or selector in a
 //                                                code span; words (warn=over-160 above 160,
 //                                                warn=over-120-target from 121 to 160), attribution; with --refs
 //                                                (base references/steps-to-test), no 8-word run of a
-//                                                quoted reference example of 8+ words
+//                                                quoted reference example of 8+ words; with
+//                                                --project-rules <file> (the project's local
+//                                                .claude/domaine/steps-to-test.md), its frontmatter:
+//                                                item 1's environment and a listed host, no unlisted
+//                                                host, bare page links (a catalog path) on item 1's
+//                                                hosts in items 2–3 (required with
+//                                                `links: required` unless --no-page-link)
+//   drafter-check.cjs rules <file> [--prose]     a project rules file's frontmatter, parsed and printed;
+//                                                --prose adds its prose part after a `prose:` line
+//   drafter-check.cjs rules-path [--cwd <dir>]   which project rules file applies: this tree's, else the
+//                                                main checkout's when this is a linked worktree, else
+//                                                none; keeps it out of git (info/exclude) or warns
 //   drafter-check.cjs file pr <path> [--no-preview]  pr-body.md: core skeleton, theme preview table
 //                                                (off with --no-preview when the notes.md beside it
 //                                                records 'preview-decision: no preview'), None/N/A,
 //                                                Summary, attribution
-//   drafter-check.cjs file jira <path>           jira-comment.md: PR line, bulleted brief, no preview link, attribution
+//   drafter-check.cjs file jira <path> [--table]  jira-comment.md: PR line, bulleted brief, no preview link,
+//                                                attribution; a GFM table fails, except with --table (the
+//                                                developer asked for one): then its rows are no brief lines
 //   drafter-check.cjs receipt stt|pr|jira        the drafter's reply on stdin: one kind, no empty field;
-//                                                stt: `ac: empty` and a non-empty `ac_proposal:` come together
+//                                                stt: `ac: empty` and a non-empty `ac_proposal:` come together;
+//                                                `page_links: none — <why>` and `pages_needed:` never together
 //
-// First stdout line: result=ok|fail. Exit 0 ok, 1 fail, 2 usage.
+// First stdout line: result=ok|fail (rules-path: rules=…). Exit 0 ok, 1 fail, 2 usage; rules-path exits 0.
 'use strict';
 const fs = require('fs');
 const nodePath = require('path');
+const { spawnSync } = require('child_process');
 
-const USAGE = `usage: drafter-check.cjs file stt <path> [--refs <dir>]
+const USAGE = `usage: drafter-check.cjs file stt <path> [--refs <dir>] [--project-rules <file> [--no-page-link]]
+       drafter-check.cjs rules <file> [--prose]
+       drafter-check.cjs rules-path [--cwd <dir>]
        drafter-check.cjs file pr <path> [--no-preview]   (--theme: accepted, no-op)
-       drafter-check.cjs file jira <path>
+       drafter-check.cjs file jira <path> [--table]
        drafter-check.cjs receipt stt|pr|jira   (the drafter's reply on stdin)
 The pr check requires the Theme preview table; --no-preview turns that off only when the notes.md
 beside the checked file holds a 'preview-decision: no preview' line (the developer's recorded
@@ -35,6 +53,26 @@ The stt check never fails on words: it prints warn=over-120-target from 121 to 1
 above 160 (still ok).
 --refs <dir> (an existing dir of *.md) fails a field holding 8 consecutive words of a "quoted" example
 of 8+ words from those files; prints examples=<n checked>, else examples=skipped.
+--project-rules <file> applies the project's Steps to Test rules (base references/steps-to-test/
+project-rules.md): an environment word in item 1 the file does not allow fails, an item 1 naming none of
+its hosts fails, a page link or *.myshopify.com host outside its stores fails, a page link (a
+/products|collections|pages|blogs/<handle> URL) on its hosts in items 2–3 is no handle but fails in a
+code span, behind [label](url) or on a host item 1 does not name,
+theme: published fails a preview link, and links: required fails a field with no page link on its
+hosts — unless --no-page-link (the receipt's 'page_links: none — <why>'). A malformed file fails
+with 'fail project rules: <reason>'; 'rules <file>' prints the parsed values only, and with --prose
+then a 'prose:' line and the file's prose part verbatim ('prose: none' when it has none).
+rules-path finds the project rules file, stopping at the first that exists: <project root>/.claude/
+domaine/steps-to-test.md in this tree, then the same path in the main checkout when this tree is a
+linked git worktree. It prints one line, 'rules=tree path=<abs>', 'rules=main path=<abs>' or
+'rules=none' (also outside git), and for a found file at most one more line: 'warn=rules_tracked
+path=<abs>' when git tracks it; 'excluded=.claude/domaine/steps-to-test.md exclude=<abs>' when it was
+untracked and not ignored, that line went into the repo's local info/exclude and git now ignores it;
+'warn=rules_not_ignored reason=check_ignore_failed|exclude_unwritable|gitignore_reincludes path=<abs>'
+when it is untracked and still not ignored. Exit 0 whatever it finds.
+The jira check fails a GFM table (a pipe row over a --- separator row, as base md-to-adf.cjs reads
+one); --table, only when the developer asked for a table in the comment, takes its rows out of the
+brief's line count and bullet check. Prints tables=<n>.
 Prints result=ok|fail, counts and one 'fail <check>' line per defect — never the checked text.
 Exit 0 ok, 1 fail, 2 usage.`;
 
@@ -70,6 +108,8 @@ const OLD_FORMAT = /handles are examples|why the bug happened|what was changed|w
 const HANDLE = /\/(?:products|collections|pages|blogs)\/[A-Za-z0-9]|\be\.g\.,?\s*[`'"(]?\/|\be\.g\.,?\s*`[a-z0-9]+(?:-[a-z0-9]+)+`/i;
 const PAGE_PATH = /\/pages\/([A-Za-z0-9][\w-]*)/gi;
 const ALL_COLLECTION = /\/collections\/all(?![\w-])/gi;
+// the DevTools Network panel; More tools > Network request blocking / Network conditions are drawers with no filter
+const NETWORK_PANEL = /\bNetwork\b(?!\s+(?:[Rr]equest\s+[Bb]locking|[Cc]onditions)\b)/;
 
 /** The <x> of every templates/page.<x>.json|liquid under the cwd and the nearest ancestor of an absolute `path` holding templates/. */
 function pageTemplates(path) {
@@ -123,14 +163,183 @@ function copiedExample(lines, examples) {
     .some((_, i) => field.includes(` ${w.slice(i, i + EXAMPLE_WORDS).join(' ')} `))) || null;
 }
 
-/** Steps to Test: the structural rules of base references/steps-to-test/{templates,shape-and-size,self-check}.md a script can see. */
-function checkStt(path, refs) {
+// base references/steps-to-test/project-rules.md: the frontmatter keys a project rules file may hold
+const RULE_KEYS = ['environment', 'theme', 'links', 'stores'];
+const ENVIRONMENTS = { dev: 'DEV', uat: 'UAT', prod: 'Prod', production: 'Prod' };
+const ENV_WORD = /\b(dev|uat|prod|production)\b/gi;
+const LINKS = ['required', 'optional', 'off'];
+const PAGE_URL = /https?:\/\/([A-Za-z0-9.-]+)(?::\d+)?([^\s)\]>`'"]*)/g;
+const MYSHOPIFY = /\b[a-z0-9][a-z0-9-]*\.myshopify\.com\b/gi;
+const CATALOG_PATH = /^\/(?:products|collections|pages|blogs)\//i;
+const MD_LINK = /\[[^\]]*\]\(([^)]*)\)/g;
+/** `host` named in `line` as a whole host, not as part of a longer one. */
+const hostIn = (line, host) => new RegExp(`(?<![\\w.-])${host.replace(/[.]/g, '\\.')}(?![\\w-])`, 'i').test(line);
+const unquote = (s) => s.trim().replace(/^(["'])(.*)\1$/, '$2').trim();
+const normHost = (h) => unquote(h).toLowerCase().replace(/^https?:\/\//, '').replace(/[/?#:].*$/, '').replace(/\.$/, '');
+
+/** The `---` frontmatter of `text` as { key: string | (string | object)[] }; `#` comments dropped. Throws on a line it cannot place. */
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+function frontmatter(text) {
+  const m = FRONTMATTER.exec(text);
+  if (!m) throw new Error('no --- frontmatter at the top of the file');
+  const out = {};
+  let key = null;
+  m[1].split(/\r?\n/).forEach((raw, i) => {
+    const l = raw.replace(/(^|\s)#.*$/, '').replace(/\s+$/, '');
+    if (!l.trim()) return;
+    let f = /^([a-z][\w-]*):\s*(.*)$/.exec(l);
+    if (f) {
+      key = f[1];
+      if (key in out) throw new Error(`${key}: given twice`);
+      out[key] = f[2] === '' ? [] : f[2];
+      return;
+    }
+    const list = key !== null && Array.isArray(out[key]) ? out[key] : null;
+    const last = list && list[list.length - 1];
+    if ((f = /^\s*-\s+(.*)$/.exec(l)) && list) {
+      const kv = /^([a-z][\w-]*):\s*(.*)$/.exec(f[1]);
+      list.push(kv ? { [kv[1]]: kv[2] } : f[1]);
+      return;
+    }
+    if ((f = /^\s+([a-z][\w-]*):\s*(.*)$/.exec(l)) && last && typeof last === 'object' && !(f[1] in last)) { last[f[1]] = f[2]; return; }
+    throw new Error(`frontmatter line ${i + 2} is not \`key: value\`, \`- item\` or a field of the entry above`);
+  });
+  return out;
+}
+
+/** A project rules file (base references/steps-to-test/project-rules.md), normalised to { environments: string[]|null, theme: 'published'|null, links, stores: [{brand, store, host}] }. Throws Error('<key>: <reason>') on a missing file, an unknown key, an empty or malformed value. */
+function projectRules(path) {
+  let text;
+  try { text = fs.readFileSync(path, 'utf8'); } catch (e) { throw new Error('file missing'); }
+  const fm = frontmatter(text);
+  const unknown = Object.keys(fm).filter((k) => !RULE_KEYS.includes(k));
+  if (unknown.length) throw new Error(`unknown key ${unknown[0]} (keys: ${RULE_KEYS.join(', ')})`);
+  if (!RULE_KEYS.some((k) => k in fm)) throw new Error(`no rule key (${RULE_KEYS.join(', ')})`);
+  const one = (k) => {
+    const v = fm[k];
+    if (v === undefined) return null;
+    if (typeof v !== 'string' || !unquote(v)) throw new Error(`${k}: empty or not one value`);
+    return unquote(v).toLowerCase();
+  };
+  const r = { environments: null, theme: one('theme'), links: one('links') || 'off', stores: [] };
+  if (r.theme !== null && r.theme !== 'published') throw new Error(`theme: "${r.theme}" is not published`);
+  if (!LINKS.includes(r.links)) throw new Error(`links: "${r.links}" is not ${LINKS.join(', ')}`);
+  if ('environment' in fm) {
+    const v = fm.environment;
+    const raw = (Array.isArray(v) ? v : splitOptions(v) || [v]).map((x) => (typeof x === 'string' ? unquote(x) : ''));
+    if (!raw.length || raw.some((x) => !x)) throw new Error('environment: empty');
+    r.environments = [...new Set(raw.map((x) => {
+      if (!ENVIRONMENTS[x.toLowerCase()]) throw new Error(`environment: "${x}" is not DEV, UAT or Prod`);
+      return ENVIRONMENTS[x.toLowerCase()];
+    }))];
+  }
+  if ('stores' in fm) {
+    const v = fm.stores;
+    if (!Array.isArray(v) || !v.length || v.some((e) => typeof e !== 'object')) throw new Error('stores: empty or not a list of `- brand: / store: / host:` entries');
+    r.stores = v.map((e, i) => {
+      const bad = Object.keys(e).find((k) => !['brand', 'store', 'host'].includes(k));
+      if (bad) throw new Error(`stores entry ${i + 1}: unknown field ${bad} (brand, store, host)`);
+      if (!e.host || !unquote(e.host)) throw new Error(`stores entry ${i + 1}: host missing`);
+      const host = normHost(e.host);
+      if (!/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(host)) throw new Error(`stores entry ${i + 1}: host "${unquote(e.host)}" is not a storefront host`);
+      return { brand: e.brand ? unquote(e.brand) : '', store: e.store ? unquote(e.store) : '', host };
+    });
+  }
+  if (r.links !== 'off' && !r.stores.length) throw new Error(`stores: missing (links: ${r.links} needs the allowed hosts)`);
+  return r;
+}
+
+/** `rules <file> [--prose]`: the parsed values of a project rules file, or its named error; `prose` adds the text below its frontmatter. */
+function checkRules(path, prose) {
+  let r;
+  try { r = projectRules(path); } catch (e) { return report(['rules=invalid'], [`project rules: ${e.message}`]); }
+  const rc = report([`environment=${r.environments ? r.environments.join(',') : 'any'}`, `theme=${r.theme || 'general'}`,
+    `links=${r.links}`, `stores=${r.stores.length}`, `hosts=${r.stores.map((s) => s.host).join(',') || '-'}`], []);
+  if (prose) {
+    const body = fs.readFileSync(path, 'utf8').replace(FRONTMATTER, '').replace(/^\s*\n/, '').replace(/\s+$/, '');
+    process.stdout.write(body ? `prose:\n${body}\n` : 'prose: none\n');
+  }
+  return rc;
+}
+
+// base references/steps-to-test/project-rules.md: the project rules file, relative to a checkout's root
+const RULES_REL = '.claude/domaine/steps-to-test.md';
+
+/** `git -C <dir> <args>`: { status, out } with stdout trimmed; status null when git cannot run. */
+function git(dir, args) {
+  const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  return { status: r.status, out: (r.stdout || '').trim() };
+}
+const real = (p) => { try { return fs.realpathSync(p); } catch (e) { return null; } };
+const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch (e) { return false; } };
+
+/** The main checkout of the linked worktree at `top`, or null (not a linked worktree, a bare or odd common dir). */
+function mainCheckout(top) {
+  const common = git(top, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  const own = git(top, ['rev-parse', '--path-format=absolute', '--git-dir']);
+  if (common.status !== 0 || own.status !== 0 || !common.out || real(common.out) === real(own.out)) return null;
+  if (nodePath.basename(common.out) !== '.git') return null;
+  const main = nodePath.dirname(common.out);
+  const t = git(main, ['rev-parse', '--show-toplevel']);
+  return t.status === 0 && real(t.out) === real(main) ? main : null;
+}
+
+/** `rules-path [--cwd <dir>]`: the project rules file this tree uses, kept out of git; always 0. */
+function rulesPath(cwd) {
+  const say = (lines) => { process.stdout.write(lines.join('\n') + '\n'); return 0; };
+  const top = git(cwd, ['rev-parse', '--show-toplevel']);
+  if (top.status !== 0 || !top.out) return say(['rules=none']);
+  let from = 'tree';
+  let root = top.out;
+  if (!isFile(nodePath.join(root, RULES_REL))) {
+    const main = mainCheckout(root);
+    if (!main || !isFile(nodePath.join(main, RULES_REL))) return say(['rules=none']);
+    from = 'main';
+    root = main;
+  }
+  const file = nodePath.join(root, RULES_REL);
+  const lines = [`rules=${from} path=${file}`];
+  if (git(root, ['ls-files', '--error-unmatch', '--', RULES_REL]).status === 0) return say([...lines, `warn=rules_tracked path=${file}`]);
+  const notIgnored = (reason) => say([...lines, `warn=rules_not_ignored reason=${reason} path=${file}`]);
+  const ignored = () => git(root, ['check-ignore', '-q', '--', RULES_REL]).status;
+  const before = ignored();
+  if (before === 0) return say(lines);
+  const common = git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (before !== 1 || common.status !== 0 || !common.out) return notIgnored('check_ignore_failed');
+  const exclude = nodePath.join(common.out, 'info', 'exclude');
+  let wrote = false;
+  try {
+    let text = '';
+    try { text = fs.readFileSync(exclude, 'utf8'); } catch (e) { fs.mkdirSync(nodePath.dirname(exclude), { recursive: true }); }
+    if (!text.split(/\r?\n/).some((l) => l.trim() === RULES_REL || l.trim() === `/${RULES_REL}`)) {
+      fs.appendFileSync(exclude, `${text && !text.endsWith('\n') ? '\n' : ''}${RULES_REL}\n`);
+      wrote = true;
+    }
+  } catch (e) { return notIgnored('exclude_unwritable'); }
+  // a re-including .gitignore pattern outranks info/exclude
+  if (!wrote || ignored() !== 0) return notIgnored('gitignore_reincludes');
+  return say([...lines, `excluded=${RULES_REL} exclude=${exclude}`]);
+}
+
+/** Steps to Test: the structural rules of base references/steps-to-test/{templates,shape-and-size,self-check}.md a script can see, plus a project rules file's when `rules` is given. */
+function checkStt(path, refs, rulesPath, noPageLink) {
   const fails = [];
+  let rules = null;
+  if (rulesPath) {
+    try { rules = projectRules(rulesPath); } catch (e) { return report(['kind=stt', 'rules=invalid'], [`project rules: ${e.message}`]); }
+  }
   const text = readFile(path, fails);
   const examples = refs ? refExamples(refs) : null;
   const ex = examples ? `examples=${examples.length}` : 'examples=skipped';
   if (text === null) return report(['kind=stt', ex], fails);
   const lines = text.split('\n');
+  let cur = 0;
+  const itemAt = lines.map((l) => { const t = /^(\d+)\. /.exec(l); if (t) cur = Number(t[1]); return cur; });
+  const hosts = new Set(rules ? rules.stores.map((s) => s.host) : []);
+  const linking = rules && rules.links !== 'off';
+  const storeLink = (t) => [...t.matchAll(PAGE_URL)].some((m) => hosts.has(m[1].toLowerCase()) && CATALOG_PATH.test(m[2]));
+  const pageLink = (i, host, path) => linking && (itemAt[i] === 2 || itemAt[i] === 3) && hosts.has(host.toLowerCase()) && CATALOG_PATH.test(path);
+  const linkFree = (l, i) => (linking ? l.replace(PAGE_URL, (m, h, p) => (pageLink(i, h, p) ? ' ' : m)) : l);
   const first = lines.find((l) => l.trim()) || '';
   if (!STT_ITEMS[0][1].test(first)) fails.push('item 1 is not the **Theme:** line');
   STT_ITEMS.slice(1).forEach(([name, re]) => { if (!lines.some((l) => re.test(l))) fails.push(`item missing: ${name}`); });
@@ -167,17 +376,49 @@ function checkStt(path, refs) {
   if (lines.some((l) => OLD_FORMAT.test(l))) fails.push('old-format text in the field (handle substitution, Bug-template label, context item, "already set up")');
   const pages = pageTemplates(path);
   const unbound = (l) => l.replace(PAGE_PATH, (m, x) => (pages.has(x.toLowerCase()) ? '/pages/…' : m)).replace(ALL_COLLECTION, '/collections/…');
-  if (lines.some((l) => HANDLE.test(unbound(l)))) fails.push('catalog handle in the field (data as properties, never a handle; a /pages/<x> with templates/page.<x>.json is a page type)');
+  if (lines.some((l, i) => HANDLE.test(unbound(linkFree(l, i))))) fails.push('catalog handle in the field (data as properties, never a handle; a /pages/<x> with templates/page.<x>.json is a page type)');
   if (lines.some(notBareLink)) fails.push('preview link not bare (a code span or [label](url) is not clickable in Jira)');
-  if (lines.some((l) => /\bNetwork\b/.test(l) && !/\bfilter\b/i.test(l))) fails.push('Network without its filter (every DevTools > Network mention names filter Fetch/XHR, Img, Doc …)');
+  if (lines.some((l) => NETWORK_PANEL.test(l) && !/\bfilter\b/i.test(l))) fails.push('Network without its filter (every DevTools > Network mention names filter Fetch/XHR, Img, Doc …)');
   if (lines.some((l) => /DevTools\s*>\s*Elements\b|\bElements (panel|tab)\b/.test(l) && !l.includes('`'))) fails.push('Elements without its attribute (every DevTools > Elements mention names the attribute or selector it points at, in a code span)');
   const copied = examples && copiedExample(lines, examples);
   if (copied) fails.push(`example copied from the references: "${copied.slice(0, 6).join(' ')}…" (write the fact from this ticket's sources)`);
+  const ruled = [];
+  if (rules) {
+    const allowed = rules.environments;
+    if (allowed) {
+      const said = new Set(lines.filter((l, i) => itemAt[i] === 1).flatMap((l) => [...l.matchAll(ENV_WORD)].map((m) => ENVIRONMENTS[m[1].toLowerCase()])));
+      [...said].filter((e) => !allowed.includes(e)).forEach((e) => fails.push(`environment ${e} in item 1 (the project rules allow ${allowed.join(', ')} only)`));
+      if (![...said].some((e) => allowed.includes(e))) fails.push(`item 1 names no environment the project rules allow (${allowed.join(', ')})`);
+    }
+    let foreign = 0;
+    let links = 0;
+    if (hosts.size) {
+      const named = [...hosts].filter((h) => lines.some((l, i) => itemAt[i] === 1 && hostIn(l, h)));
+      if (!named.length) fails.push('item 1 names no store host the project rules list');
+      const crossed = new Set();
+      lines.forEach((l, i) => {
+        foreign += [...l.matchAll(MYSHOPIFY)].filter((m) => !hosts.has(m[0].toLowerCase())).length;
+        for (const m of l.matchAll(PAGE_URL)) {
+          if (!hosts.has(m[1].toLowerCase()) && !/\.myshopify\.com$/i.test(m[1]) && CATALOG_PATH.test(m[2])) foreign += 1;
+          if (!pageLink(i, m[1], m[2])) continue;
+          links += 1;
+          if (named.length && !named.includes(m[1].toLowerCase())) crossed.add(m[1].toLowerCase());
+        }
+      });
+      if (foreign) fails.push(`storefront host the project rules do not list (${[...hosts].join(', ')})`);
+      if (crossed.size) fails.push(`page link on a store item 1 does not name (${[...crossed].join(', ')})`);
+      if (linking && lines.some((l) => [...l.matchAll(CODE_SPAN)].some((m) => storeLink(m[2])) || [...l.matchAll(MD_LINK)].some((m) => storeLink(m[1]))))
+        fails.push('page link not bare (a code span or [label](url) is not clickable in Jira)');
+    }
+    if (rules.theme === 'published' && PREVIEW_ID.test(text)) fails.push('preview link with theme: published (the published theme opens with the plain storefront URL)');
+    if (rules.links === 'required' && !links && !noPageLink) fails.push('no page link on a project store in items 2–3 (links: required; a change with no storefront page: --no-page-link with the receipt\'s page_links: none — <why>)');
+    ruled.push('rules=on', `page_links=${links}`, `foreign_hosts=${foreign}`, ...(noPageLink ? ['no_page_link=on'] : []));
+  }
   const words = wordCount(lines);
   const hits = attributionHits(text);
   if (hits) fails.push('AI attribution');
   const warn = words > STT_MAX_WORDS ? ['warn=over-160'] : words > STT_TARGET_WORDS ? ['warn=over-120-target'] : [];
-  return report(['kind=stt', `items=${nums.length}`, `words=${words}`, ex, `attribution_hits=${hits}`, ...warn], fails);
+  return report(['kind=stt', `items=${nums.length}`, `words=${words}`, ex, ...ruled, `attribution_hits=${hits}`, ...warn], fails);
 }
 
 // fe create-pull-request reference/body-sections.md: the core skeleton, in order. The docs ask for a
@@ -251,16 +492,35 @@ const ROT = [
   ['editor URL', /\/themes\/\d+\/editor|\/admin\/themes\/\d+|admin\.shopify\.com\/store\/[^/\s]+\/themes\/\d+/i],
   ['theme id', /\btheme[ _-]?id\b|\btheme\s*#?\d{6,}|\b\d{11,14}\b/i],
 ];
-const BRIEF_KEY = /^\s*(?:workspace|mode|answers|ticket|target|findings|related|screenshot_dir|previous|feedback|question|pr_url|pr_title|brief):\s|^\s*(?:branch|base)=/;
+// a GFM table as base scripts/md-to-adf.cjs reads one: a row with an unescaped pipe over a separator
+// row, then every following non-blank row with a pipe; a line that only holds a pipe is no table
+const PIPE = /(?<!\\)\|/;
+const TABLE_SEP = /^[ \t]*\|?[ \t:]*-{1,}[-\t :|]*$/;
+/** The indexes of `raw`'s table rows and the number of tables. */
+function tableRows(raw) {
+  const rows = new Set();
+  let n = 0;
+  for (let i = 0; i + 1 < raw.length; i++) {
+    if (rows.has(i) || !PIPE.test(raw[i]) || !PIPE.test(raw[i + 1]) || !TABLE_SEP.test(raw[i + 1])) continue;
+    n += 1;
+    rows.add(i).add(i + 1);
+    for (let j = i + 2; j < raw.length && PIPE.test(raw[j]) && raw[j].trim(); j++) rows.add(j);
+  }
+  return { rows, n };
+}
+const BRIEF_KEY = /^\s*(?:workspace|mode|answers|ticket|target|findings|related|screenshot_dir|previous|feedback|question|pr_url|pr_title|brief|table):\s|^\s*(?:branch|base)=/;
 
-/** Jira PR-link comment: the PR line first, brief lines ≤ 6, no bare label, no None/N/A, nothing that rots, no brief text, attribution. */
-function checkJira(path) {
+/** Jira PR-link comment: the PR line first, brief lines ≤ 6, no bare label, no None/N/A, nothing that rots, no brief text, attribution; a table only with `table` (the developer's request), its rows outside the brief. */
+function checkJira(path, table) {
   const fails = [];
   const text = readFile(path, fails);
   if (text === null) return report(['kind=jira'], fails);
-  const lines = text.split('\n').filter((l) => l.trim());
+  const raw = text.split('\n');
+  const tables = tableRows(raw);
+  if (tables.n && !table) fails.push("table in the comment (only on the developer's request: --table, and base:jira-writer with tables: keep)");
+  const lines = raw.filter((l) => l.trim());
   if (!PR_LINE.test(lines[0] || '')) fails.push("line 1 is not 'PR: <url> — <title>'");
-  const brief = lines.slice(1);
+  const brief = raw.filter((l, i) => l.trim() && !tables.rows.has(i)).slice(1);
   if (brief.length > 6) fails.push('brief longer than 6 lines');
   if (brief.some((l) => !/^\s*[-*]\s+\S/.test(l))) fails.push('brief line is not a bullet');
   if (lines.some((l) => /^#{1,6} /.test(l))) fails.push('heading in the comment');
@@ -276,7 +536,7 @@ function checkJira(path) {
   if (lines.some((l) => BRIEF_KEY.test(l))) fails.push('brief text in the comment');
   const hits = attributionHits(text);
   if (hits) fails.push('AI attribution');
-  return report(['kind=jira', `brief_lines=${brief.length}`, `attribution_hits=${hits}`], fails);
+  return report(['kind=jira', `brief_lines=${brief.length}`, `tables=${tables.n}`, `attribution_hits=${hits}`], fails);
 }
 
 // `[a, b, "c, d"]` → its entries, commas inside quotes kept
@@ -357,6 +617,11 @@ function checkReceipt(kind, text) {
       const proposal = field(lines, 'ac_proposal');
       if (field(lines, 'ac') === 'empty') { if (!proposal) fails.push('ac_proposal empty with ac: empty'); }
       else if (proposal !== null) fails.push('ac_proposal without ac: empty');
+      const waiver = field(lines, 'page_links');
+      const needed = field(lines, 'pages_needed');
+      if (waiver !== null && !/^none\s*[—–-]+\s*\S/.test(waiver)) fails.push("page_links is not 'none — <why>'");
+      if (needed !== null && !needed) fails.push('pages_needed empty');
+      if (waiver !== null && needed !== null) fails.push('pages_needed with page_links: none');
     }
     if (kind === 'pr') {
       if (!field(lines, 'title')) fails.push('title empty');
@@ -374,6 +639,14 @@ function checkReceipt(kind, text) {
 function main(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { process.stdout.write(USAGE + '\n'); return 0; }
   const [cmd, kind, path, ...rest] = argv;
+  if (cmd === 'rules' && kind && !kind.startsWith('--') && (path === undefined || (path === '--prose' && !rest.length))) return checkRules(kind, path === '--prose');
+  if (cmd === 'rules-path') {
+    const args = argv.slice(1);
+    if (!args.length) return rulesPath(process.cwd());
+    if (args.length === 2 && args[0] === '--cwd' && args[1]) return rulesPath(nodePath.resolve(args[1]));
+    process.stderr.write(USAGE + '\n');
+    return 2;
+  }
   if (!['stt', 'pr', 'jira'].includes(kind)) { process.stderr.write(USAGE + '\n'); return 2; }
   if (cmd === 'file' && path) {
     let refs = null;
@@ -384,10 +657,19 @@ function main(argv) {
       try { if (!refs || !fs.statSync(refs).isDirectory()) refs = null; } catch (e) { refs = null; }
       if (!refs) { process.stderr.write(USAGE + '\n'); return 2; }
     }
-    const unknown = rest.filter((a) => !(kind === 'pr' && (a === '--theme' || a === '--no-preview')));
+    let rules = null;
+    const p = rest.indexOf('--project-rules');
+    if (kind === 'stt' && p >= 0) {
+      rules = rest[p + 1];
+      rest.splice(p, 2);
+      if (!rules || rules.startsWith('--')) { process.stderr.write(USAGE + '\n'); return 2; }
+    }
+    const noPageLink = rest.includes('--no-page-link');
+    const unknown = rest.filter((a) => !(kind === 'pr' && (a === '--theme' || a === '--no-preview')) && !(rules && a === '--no-page-link')
+      && !(kind === 'jira' && a === '--table'));
     if (unknown.length) { process.stderr.write(USAGE + '\n'); return 2; }
-    if (kind === 'jira') return checkJira(path);
-    return kind === 'stt' ? checkStt(path, refs) : checkPr(path, noPreviewState(path, rest.includes('--no-preview')));
+    if (kind === 'jira') return checkJira(path, rest.includes('--table'));
+    return kind === 'stt' ? checkStt(path, refs, rules, noPageLink) : checkPr(path, noPreviewState(path, rest.includes('--no-preview')));
   }
   if (cmd === 'receipt' && path === undefined) {
     let text = '';

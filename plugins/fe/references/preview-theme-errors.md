@@ -250,7 +250,7 @@ stacks). On `create --duplicate-of` the copy is kept and named (`theme=<id> — 
 kept…`): it still carries the source theme's code — re-push with `refresh --theme <id> --store
 <store>` (same `--brand`) once the cause is fixed, never a second `--duplicate-of`.
 
-### A copy of another theme — `error=duplicate_source_not_found` · `error=duplicate_failed` · `error=duplicate_timeout` · `error=bad_brand` · `error=unknown_brand` · `error=brand_required`
+### A copy of another theme — `error=duplicate_source_not_found` · `error=duplicate_failed` · `error=duplicate_timeout` · `error=duplicate_reuse_conflict` · `error=bad_brand` · `error=unknown_brand` · `error=brand_required`
 
 `create --name <NAME> --duplicate-of <theme-id|name> [--brand <b>] --store <store>` — never run
 `shopify theme duplicate`, the build, the push or a poll by hand; the script owns all four.
@@ -275,6 +275,9 @@ kept…`): it still carries the source theme's code — re-push with `refresh --
   theme can take longer. Nothing was pushed — a push while it processes is overwritten when the
   copy finishes. Wait, then run the `hint=` line (`refresh --theme <id> --store <store>`); never
   re-run `--duplicate-of` (a second copy).
+- **`error=duplicate_reuse_conflict`** → `--duplicate-of` came with `--reuse`; nothing was built or
+  pushed. A copy is always a new theme, so `--reuse` does not apply: re-run without it. To push the
+  branch into a copy that already exists, `refresh --theme <id> --store <store>` instead.
 - **`error=bad_brand`** → `--brand` takes a bare brand code (`[A-Za-z0-9_-]`); it is passed to the
   build as `BRAND` and nothing else. Nothing ran.
 - **`error=unknown_brand brand=<b> known=<dir,…>`** → the project has `multi-brand/brands/` and

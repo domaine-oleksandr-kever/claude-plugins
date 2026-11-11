@@ -5903,7 +5903,7 @@ else bad D6m-duplicate-no-id-at-cap "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # D7: --reuse with --duplicate-of is refused; a malformed --brand is refused before the store
 dup_run dup7 -- --duplicate-of 777 --reuse --no-build
-if [ "$rc" -eq 1 ] && grep -q '^error=--duplicate-of always makes a new theme' "$O" && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_reuse_conflict — --duplicate-of always makes a new theme' "$O" && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
 else bad D7-duplicate-reuse-refused "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 dup_run dup7b -- --duplicate-of 777 --brand 'CL;x' --no-build
 if [ "$rc" -eq 1 ] && grep -q '^error=bad_brand' "$O" && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
@@ -6146,6 +6146,14 @@ dc_stt DC8zo-stt-network-no-filter "$NET" "${CART}   - an affected card: in the 
 sed 's|^4\. \*\*Edge cases / not obvious:\*\*|4. **Edge cases / not obvious:** a network-level fix;|' "$DCD/stt.md" > "$DCD/stt-netlevel.md"
 dc DC8zp-stt-network-level-no-mention 0 'result=ok' file stt "$DCD/stt-netlevel.md"
 grep -qF "$NET" "$DCD/out" && bad DC8zp-no-net-fail "$(tr '\n' ';' < "$DCD/out")" || ok
+# DC8zpa–DC8zpc: the More tools > Network request blocking / Network conditions drawers are no Network panel
+sed "${CART}   - block the feed: DevTools > More tools > Network request blocking, pattern \`*\/apps\/feed*\`./" "$DCD/stt.md" > "$DCD/stt-netblock.md"
+dc DC8zpa-stt-network-request-blocking-ok 0 'result=ok' file stt "$DCD/stt-netblock.md"
+sed "${CART}   - a slow connection: DevTools > More tools > Network conditions, throttling Slow 4G./" "$DCD/stt.md" > "$DCD/stt-netcond.md"
+dc DC8zpb-stt-network-conditions-ok 0 'result=ok' file stt "$DCD/stt-netcond.md"
+dc_stt DC8zpc-stt-blocking-and-panel-no-filter "$NET" "${CART}   - DevTools > More tools > Network request blocking, then the feed request in DevTools > Network./"
+sed "${CART}   - block the feed: DevTools > More tools > Network Request Blocking; a slow one: Network Conditions, Slow 4G./" "$DCD/stt.md" > "$DCD/stt-netblock-tc.md"
+dc DC8zpd-stt-network-drawers-title-case-ok 0 'result=ok' file stt "$DCD/stt-netblock-tc.md"
 # DC8zx–DC8zz: every DevTools > Elements mention names its attribute or selector in a code span; a prose "Elements" is no mention
 ELM='fail Elements without its attribute'
 sed 's|^2\. \*\*Object:\*\* .*|2. **Object:** the product gallery slides; not visible: DevTools > Elements, `aria-label="<n> of <total>"` on each slide.|' "$DCD/stt.md" > "$DCD/stt-elm.md"
@@ -6178,6 +6186,182 @@ grep -q '^examples=[1-9]' "$DCD/out" && ok || bad DC8zw-real-examples "$(tr '\n'
 # DC8zw2: an allowance the real refs spell out (the existing-entity non-hedge) is never read back as a copied example
 sed 's/^   - a cart below the threshold, no free-delivery offer\./   - a cart below the threshold, no free-delivery offer — if the store already has one, use it./' "$DCD/stt.md" > "$DCD/stt-allowed.md"
 dc DC8zw2-stt-real-refs-allowed-phrase-ok 0 'result=ok' file stt "$DCD/stt-allowed.md" --refs "$ROOT/plugins/base/references/steps-to-test"
+# DCR*: --project-rules <file> (base references/steps-to-test/project-rules.md) — a UAT-only file with page links required
+mkdir -p "$DCD/pr-rules"
+cat > "$DCD/pr-rules/uat.md" <<'MD'
+---
+environment: uat
+theme: Published
+links: required
+stores:
+  - brand: MAC US
+    store: elc-us-mc-uat
+    host: "https://ELC-US-MC-UAT.myshopify.com/"   # a raw value: scheme, case and slash normalised
+  - brand: Clinique US
+    host: elc-us-cl-uat.myshopify.com
+# TODO(owner): a host no source confirms stays a comment
+---
+
+# Prose the drafter reads; never parsed.
+MD
+cat > "$DCD/stt-rules.md" <<MD
+1. **Theme:** UAT — MAC US (elc-us-mc-uat.myshopify.com), the published theme (the theme the TL deploys \`develop\` to). $SENT
+2. **Object:** the **Shade picker** block on the product page (\`/products/…\`).
+3. **Setup:**
+   - a product with 3+ shades where 1 is sold out — https://elc-us-mc-uat.myshopify.com/products/ruby-woo-lipstick;
+   - no active free-delivery offer.
+4. **Edge cases / not obvious:** a shade with no swatch image lists its name only, by design.
+MD
+R="$DCD/pr-rules/uat.md"
+dc DCR1-rules-allowed-link-ok 0 'result=ok' file stt "$DCD/stt-rules.md" --project-rules "$R"
+grep -qx 'rules=on' "$DCD/out" && grep -qx 'page_links=1' "$DCD/out" && grep -qx 'foreign_hosts=0' "$DCD/out" && ok || bad DCR1-counts "$(tr '\n' ';' < "$DCD/out")"
+dc DCR2-no-flag-unchanged 1 "$HND_MSG" file stt "$DCD/stt-rules.md"
+grep -q '^rules=' "$DCD/out" && bad DCR2-no-rules-key "$(tr '\n' ';' < "$DCD/out")" || ok
+dc DCR2b-no-flag-real-refs-unchanged 0 'result=ok' file stt "$DCD/stt.md" --refs "$ROOT/plugins/base/references/steps-to-test"
+dc_rules() { # dc_rules <label> <want-rc> <want-substr> <sed-expr> [flags…]: one edit of the good ruled file
+  local label="$1" want="$2" sub="$3" expr="$4"; shift 4
+  sed "$expr" "$DCD/stt-rules.md" > "$DCD/stt-rules-v.md"; dc "$label" "$want" "$sub" file stt "$DCD/stt-rules-v.md" --project-rules "$R" "$@"
+}
+FOREIGN='fail storefront host the project rules do not list (elc-us-mc-uat.myshopify.com, elc-us-cl-uat.myshopify.com)'
+dc_rules DCR3-rules-dev-store-link 1 "$FOREIGN" 's|elc-us-mc-uat\.myshopify\.com/products|elc-us-mc-dev.myshopify.com/products|'
+dc_rules DCR3b-rules-custom-domain-link 1 "$FOREIGN" 's|https://elc-us-mc-uat\.myshopify\.com/products|https://www.maccosmetics.com/products|'
+grep -qF "$HND" "$DCD/out" && ok || bad DCR3b-foreign-link-is-a-handle "$(tr '\n' ';' < "$DCD/out")"
+dc_rules DCR3c-rules-dev-host-item1 1 "$FOREIGN" 's|^1\. \*\*Theme:\*\* UAT — MAC US (elc-us-mc-uat|1. **Theme:** UAT — MAC US (elc-us-jm-uat|'
+dc_rules DCR4-rules-dev-in-item1 1 'fail environment DEV in item 1 (the project rules allow UAT only)' 's|^1\. \*\*Theme:\*\* UAT —|1. **Theme:** DEV —|'
+dc_rules DCR4a-rules-no-env-in-item1 1 'fail item 1 names no environment the project rules allow (UAT)' 's|^1\. \*\*Theme:\*\* UAT — MAC US (elc-us-mc-uat\.myshopify\.com)|1. **Theme:** MAC US|'
+dc_rules DCR4b-rules-dev-and-uat-item1 1 'fail environment DEV in item 1' 's|the published theme|the published theme; not the dev store|'
+grep -qF 'names no environment' "$DCD/out" && bad DCR4b-uat-named "$(tr '\n' ';' < "$DCD/out")" || ok
+dc_rules DCR4c-rules-devtools-no-env 0 'result=ok' 's|by design\.|by design; DevTools shows no error.|'
+dc_rules DCR5-rules-links-required-absent 1 'fail no page link on a project store in items 2–3' 's| — https://elc-us-mc-uat\.myshopify\.com/products/ruby-woo-lipstick||'
+dc_rules DCR5b-rules-no-page-link-waiver 0 'no_page_link=on' 's| — https://elc-us-mc-uat\.myshopify\.com/products/ruby-woo-lipstick||' --no-page-link
+dc_rules DCR6-rules-preview-link-published 1 'fail preview link with theme: published' 's|ruby-woo-lipstick;|ruby-woo-lipstick?preview_theme_id=156379611322;|'
+dc_rules DCR7-rules-relative-handle 1 "$HND" 's|https://elc-us-mc-uat\.myshopify\.com/products/ruby-woo-lipstick|`/products/ruby-woo-lipstick`|'
+dc_rules DCR8-rules-link-in-item4 1 "$HND" 's|by design\.|by design; https://elc-us-cl-uat.myshopify.com/products/x has none.|'
+# DCR9*: a malformed file fails with its named reason, before the draft is read
+dc_bad_rules() { # dc_bad_rules <label> <want-substr> <frontmatter body>
+  printf -- '---\n%s\n---\n' "$3" > "$DCD/pr-rules/bad.md"
+  dc "$1" 1 "fail project rules: $2" file stt "$DCD/stt-rules.md" --project-rules "$DCD/pr-rules/bad.md"
+  grep -qx 'rules=invalid' "$DCD/out" && ok || bad "$1-invalid" "$(tr '\n' ';' < "$DCD/out")"
+}
+dc_bad_rules DCR9a-rules-env-unknown 'environment: "QA" is not DEV, UAT or Prod' 'environment: QA'
+dc_bad_rules DCR9b-rules-env-empty 'environment: empty' $'environment:\nlinks: off'
+dc_bad_rules DCR9c-rules-unknown-key 'unknown key enviroment' 'enviroment: UAT'
+dc_bad_rules DCR9d-rules-links-no-stores 'stores: missing (links: required needs the allowed hosts)' $'environment: UAT\nlinks: required'
+dc_bad_rules DCR9e-rules-links-value 'links: "yes" is not required, optional, off' 'links: yes'
+dc_bad_rules DCR9f-rules-bad-host 'stores entry 1: host "TODO ask the TL" is not a storefront host' $'links: optional\nstores:\n  - brand: JM\n    host: TODO ask the TL'
+dc_bad_rules DCR9g-rules-host-missing 'stores entry 1: host missing' $'links: optional\nstores:\n  - brand: JM'
+dc_bad_rules DCR9h-rules-theme-value 'theme: "develop" is not published' 'theme: develop'
+dc_bad_rules DCR9i-rules-paths-unknown 'unknown key paths (keys: environment, theme, links, stores)' $'paths:\n  - "x"\nenvironment: UAT'
+dc_bad_rules DCR9i2-rules-no-rule-key 'no rule key' ''
+dc_bad_rules DCR9j-rules-stray-line 'frontmatter line 3 is not' $'environment: UAT\njust words'
+printf 'environment: UAT\n' > "$DCD/pr-rules/nofm.md"
+dc DCR9k-rules-no-frontmatter 1 'fail project rules: no --- frontmatter at the top of the file' file stt "$DCD/stt-rules.md" --project-rules "$DCD/pr-rules/nofm.md"
+dc DCR9l-rules-file-missing 1 'fail project rules: file missing' file stt "$DCD/stt-rules.md" --project-rules "$DCD/pr-rules/none.md"
+# DCR10: rules <file> prints the normalised values; DCR11: usage
+dc DCR10-rules-cmd 0 'hosts=elc-us-mc-uat.myshopify.com,elc-us-cl-uat.myshopify.com' rules "$R"
+grep -qx 'environment=UAT' "$DCD/out" && grep -qx 'theme=published' "$DCD/out" && grep -qx 'links=required' "$DCD/out" && ok || bad DCR10-values "$(tr '\n' ';' < "$DCD/out")"
+printf -- '---\nenvironment: [uat, "Production"]\n---\n' > "$DCD/pr-rules/list.md"
+dc DCR10b-rules-inline-list 0 'environment=UAT,Prod' rules "$DCD/pr-rules/list.md"
+dc DCR10c-rules-cmd-bad 1 'fail project rules: file missing' rules "$DCD/pr-rules/none.md"
+dc DCR11-usage-no-page-link-alone 2 'usage:' file stt "$DCD/stt.md" --no-page-link
+dc DCR11b-usage-rules-no-value 2 'usage:' file stt "$DCD/stt.md" --project-rules
+dc DCR11c-usage-rules-on-pr 2 'usage:' file pr "$DCD/stt.md" --project-rules "$R"
+# DCR12: links: off keeps the general link rule; the environment rule still holds
+printf -- '---\nenvironment: UAT\nlinks: off\nstores:\n  - host: elc-us-mc-uat.myshopify.com\n---\n' > "$DCD/pr-rules/off.md"
+dc DCR12-rules-links-off-handle 1 "$HND" file stt "$DCD/stt-rules.md" --project-rules "$DCD/pr-rules/off.md"
+grep -qF 'no page link' "$DCD/out" && bad DCR12-no-required "$(tr '\n' ';' < "$DCD/out")" || ok
+# DCR13*: a page link is a catalog path on a listed host, bare; item 1 names a listed host; links stay on item 1's stores
+NOLINK='fail no page link on a project store in items 2–3'
+dc_rules DCR13a-rules-bare-host-no-page 1 "$NOLINK" 's|https://elc-us-mc-uat\.myshopify\.com/products/ruby-woo-lipstick|https://elc-us-mc-uat.myshopify.com|'
+dc_rules DCR13b-rules-admin-url-no-page 1 "$NOLINK" 's|https://elc-us-mc-uat\.myshopify\.com/products/ruby-woo-lipstick|https://elc-us-mc-uat.myshopify.com/admin/products/8123456|'
+grep -qF "$HND" "$DCD/out" && ok || bad DCR13b-admin-url-is-a-handle "$(tr '\n' ';' < "$DCD/out")"
+dc_rules DCR13c-rules-password-no-page 1 "$NOLINK" 's|/products/ruby-woo-lipstick|/password|'
+dc_rules DCR13d-rules-code-span-link 1 'fail page link not bare' 's|https://elc-us-mc-uat\.myshopify\.com/products/ruby-woo-lipstick|`&`|'
+dc_rules DCR13e-rules-label-link 1 'fail page link not bare' 's|https://elc-us-mc-uat\.myshopify\.com/products/ruby-woo-lipstick|[Ruby Woo](&)|'
+dc_rules DCR13f-rules-item1-unlisted-host 1 'fail item 1 names no store host the project rules list' 's|(elc-us-mc-uat\.myshopify\.com)|(mac-uat.example.com)|'
+dc_rules DCR13g-rules-cross-store-link 1 'fail page link on a store item 1 does not name (elc-us-cl-uat.myshopify.com)' 's|elc-us-mc-uat\.myshopify\.com/products|elc-us-cl-uat.myshopify.com/products|'
+dc_rules DCR13h-rules-two-stores-ok 0 'result=ok' 's|(elc-us-mc-uat\.myshopify\.com)|(elc-us-mc-uat.myshopify.com, elc-us-cl-uat.myshopify.com)|; s|elc-us-mc-uat\.myshopify\.com/products|elc-us-cl-uat.myshopify.com/products|'
+# DCR14: list items at column 0 under their key are YAML too
+printf -- '---\nenvironment: UAT\nlinks: required\nstores:\n- brand: MAC US\n  host: elc-us-mc-uat.myshopify.com\n- host: elc-us-cl-uat.myshopify.com\n---\n' > "$DCD/pr-rules/col0.md"
+dc DCR14-rules-column0-list 0 'hosts=elc-us-mc-uat.myshopify.com,elc-us-cl-uat.myshopify.com' rules "$DCD/pr-rules/col0.md"
+dc DCR14b-rules-column0-list-stt 0 'result=ok' file stt "$DCD/stt-rules.md" --project-rules "$DCD/pr-rules/col0.md"
+printf -- '---\nenvironment: UAT\n- stray\n---\n' > "$DCD/pr-rules/col0bad.md"
+dc DCR14c-rules-column0-under-scalar 1 'fail project rules: frontmatter line 3 is not' rules "$DCD/pr-rules/col0bad.md"
+# DCR15: rules <file> --prose prints the values, then the prose part verbatim; never without --prose
+dc DCR15-rules-prose 0 'hosts=elc-us-mc-uat.myshopify.com,elc-us-cl-uat.myshopify.com' rules "$R" --prose
+[ "$(sed -n '/^prose:$/,$p' "$DCD/out")" = "$(printf 'prose:\n# Prose the drafter reads; never parsed.')" ] && ok || bad DCR15-prose-body "$(tr '\n' ';' < "$DCD/out")"
+dc DCR15b-rules-no-prose 0 'result=ok' rules "$R"
+grep -q '^prose' "$DCD/out" && bad DCR15b-prose-leaked "$(tr '\n' ';' < "$DCD/out")" || ok
+dc DCR15c-rules-prose-none 0 'prose: none' rules "$DCD/pr-rules/list.md" --prose
+dc DCR15d-rules-prose-bad-file 1 'fail project rules: file missing' rules "$DCD/pr-rules/none.md" --prose
+grep -q '^prose' "$DCD/out" && bad DCR15d-prose-on-fail "$(tr '\n' ';' < "$DCD/out")" || ok
+dc DCR15e-usage-rules-extra 2 'usage:' rules "$R" --prose extra
+dc DCR15f-usage-rules-flag-only 2 'usage:' rules --prose
+# DCR16*: rules-path — this tree, else the main checkout of a linked worktree, else none; never in git.
+# Real repos; HOME and the global/system git config sandboxed so a developer's excludesFile cannot ignore the file.
+RPD="$TMP/rp"; mkdir -p "$RPD/home"
+rp_git() { HOME="$RPD/home" GIT_CONFIG_NOSYSTEM=1 git -c user.name=t -c user.email=t@example.com "$@"; }
+rp() { # rp <label> <dir> <want-first-line> [more expected lines…]: rules-path --cwd <dir>, exact output
+  local label="$1" dir="$2"; shift 2
+  local rc=0; HOME="$RPD/home" GIT_CONFIG_NOSYSTEM=1 node "$DC" rules-path --cwd "$dir" > "$DCD/out" 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] || { bad "$label" "exit $rc :: $(tr '\n' ';' < "$DCD/out")"; return; }
+  [ "$(cat "$DCD/out")" = "$(printf '%s\n' "$@")" ] && ok || bad "$label" "got $(tr '\n' ';' < "$DCD/out") want $(printf '%s;' "$@")"
+}
+RREL=.claude/domaine/steps-to-test.md
+rp_repo() { rp_git init -q "$1" && rp_git -C "$1" commit -q --allow-empty -m init; }
+rp_file() { mkdir -p "$1/.claude/domaine" && printf -- '---\nenvironment: UAT\n---\n' > "$1/$RREL"; }
+rp_repo "$RPD/a"; rp_file "$RPD/a"; RA="$(cd "$RPD/a" && pwd -P)"
+rp DCR16a-tree-untracked-excluded "$RPD/a" "rules=tree path=$RA/$RREL" "excluded=$RREL exclude=$RA/.git/info/exclude"
+[ "$(grep -cxF "$RREL" "$RA/.git/info/exclude")" = 1 ] && ok || bad DCR16a-exclude-line "$(cat "$RA/.git/info/exclude")"
+cp "$RA/.git/info/exclude" "$RPD/a-exclude"
+rp DCR16b-second-run-ignored "$RPD/a/.claude" "rules=tree path=$RA/$RREL"
+cmp -s "$RA/.git/info/exclude" "$RPD/a-exclude" && ok || bad DCR16b-exclude-grew "$(cat "$RA/.git/info/exclude")"
+[ -z "$(rp_git -C "$RA" status --porcelain --untracked-files=all)" ] && ok || bad DCR16b-status-clean "$(rp_git -C "$RA" status --porcelain)"
+rp_git -C "$RA" worktree add -q "$RPD/a-wt" 2>/dev/null; RAW="$(cd "$RPD/a-wt" && pwd -P)"
+rp DCR16c-worktree-uses-main "$RPD/a-wt" "rules=main path=$RA/$RREL"
+rp_file "$RPD/a-wt"; printf -- '---\nenvironment: Prod\n---\n' > "$RAW/$RREL"
+rp DCR16d-worktree-own-file-wins "$RPD/a-wt" "rules=tree path=$RAW/$RREL"
+cmp -s "$RA/.git/info/exclude" "$RPD/a-exclude" && ok || bad DCR16d-shared-exclude-untouched "$(cat "$RA/.git/info/exclude")"
+rp_repo "$RPD/n"; rp DCR16e-no-file "$RPD/n" 'rules=none'
+[ -e "$RPD/n/.git/info/exclude" ] && grep -qF "$RREL" "$RPD/n/.git/info/exclude" && bad DCR16e-exclude-written "$(cat "$RPD/n/.git/info/exclude")" || ok
+mkdir -p "$RPD/plain"; rp_file "$RPD/plain"; rp DCR16f-non-git "$RPD/plain" 'rules=none'
+rp DCR16f2-missing-dir "$RPD/no-such-dir" 'rules=none'
+rp_repo "$RPD/t"; rp_file "$RPD/t"; RT="$(cd "$RPD/t" && pwd -P)"; rp_git -C "$RT" add -f "$RREL"; rp_git -C "$RT" commit -q -m rules
+rp DCR16g-tracked-warns "$RPD/t" "rules=tree path=$RT/$RREL" "warn=rules_tracked path=$RT/$RREL"
+grep -qF "$RREL" "$RT/.git/info/exclude" 2>/dev/null && bad DCR16g-tracked-excluded "$(cat "$RT/.git/info/exclude")" || ok
+rp_repo "$RPD/i"; rp_file "$RPD/i"; RI="$(cd "$RPD/i" && pwd -P)"; printf '.claude/*\n' > "$RI/.gitignore"
+cp "$RI/.git/info/exclude" "$RPD/i-exclude"
+rp DCR16h-already-ignored "$RPD/i" "rules=tree path=$RI/$RREL"
+cmp -s "$RI/.git/info/exclude" "$RPD/i-exclude" && ok || bad DCR16h-exclude-touched "$(cat "$RI/.git/info/exclude")"
+[ "$(cat "$RI/.gitignore")" = '.claude/*' ] && ok || bad DCR16h-gitignore-touched "$(cat "$RI/.gitignore")"
+rp_repo "$RPD/o"; mkdir -p "$RPD/o/.claude/rules"; printf -- '---\nenvironment: UAT\n---\n' > "$RPD/o/.claude/rules/steps-to-test.md"
+rp DCR16i-old-location-ignored "$RPD/o" 'rules=none'
+# DCR16j: no info dir yet, an exclude without a final newline — created / appended on its own line, other lines kept
+rp_repo "$RPD/x"; rp_file "$RPD/x"; RX="$(cd "$RPD/x" && pwd -P)"; rm -rf "$RX/.git/info"
+rp DCR16j-info-dir-created "$RPD/x" "rules=tree path=$RX/$RREL" "excluded=$RREL exclude=$RX/.git/info/exclude"
+[ "$(cat "$RX/.git/info/exclude")" = "$RREL" ] && ok || bad DCR16j-exclude-body "$(cat "$RX/.git/info/exclude")"
+rp_repo "$RPD/y"; rp_file "$RPD/y"; RY="$(cd "$RPD/y" && pwd -P)"; printf '# mine\n*.log' > "$RY/.git/info/exclude"
+rp DCR16k-exclude-no-final-newline "$RPD/y" "rules=tree path=$RY/$RREL" "excluded=$RREL exclude=$RY/.git/info/exclude"
+[ "$(cat "$RY/.git/info/exclude")" = "$(printf '# mine\n*.log\n%s' "$RREL")" ] && ok || bad DCR16k-exclude-body "$(cat "$RY/.git/info/exclude")"
+# DCR16l: a worktree of a bare repo has no main checkout to read: none, never a guess
+rp_git init -q --bare "$RPD/bare.git"; rp_git clone -q "$RPD/bare.git" "$RPD/seed" 2>/dev/null; rp_git -C "$RPD/seed" commit -q --allow-empty -m init
+rp_git -C "$RPD/seed" push -q origin HEAD:main 2>/dev/null; rp_file "$RPD"; rp_git -C "$RPD/bare.git" worktree add -q "$RPD/bare-wt" main 2>/dev/null
+rp DCR16l-bare-common-dir "$RPD/bare-wt" 'rules=none'
+# DCR16o–q: untracked and still not ignored after the exclude step — one named warning, never excluded=
+rp_repo "$RPD/g"; rp_file "$RPD/g"; RG="$(cd "$RPD/g" && pwd -P)"; printf '!*.md\n' > "$RG/.gitignore"
+rp DCR16o-gitignore-reincludes "$RPD/g" "rules=tree path=$RG/$RREL" "warn=rules_not_ignored reason=gitignore_reincludes path=$RG/$RREL"
+rp DCR16o2-gitignore-reincludes-rerun "$RPD/g" "rules=tree path=$RG/$RREL" "warn=rules_not_ignored reason=gitignore_reincludes path=$RG/$RREL"
+[ "$(grep -cxF "$RREL" "$RG/.git/info/exclude")" = 1 ] && ok || bad DCR16o-exclude-line "$(cat "$RG/.git/info/exclude")"
+[ "$(cat "$RG/.gitignore")" = '!*.md' ] && ok || bad DCR16o-gitignore-touched "$(cat "$RG/.gitignore")"
+rp_repo "$RPD/w"; rp_file "$RPD/w"; RW="$(cd "$RPD/w" && pwd -P)"; chmod 444 "$RW/.git/info/exclude"
+if [ -w "$RW/.git/info/exclude" ]; then ok; else # root writes a 444 file anyway: nothing to prove there
+  rp DCR16p-exclude-unwritable "$RPD/w" "rules=tree path=$RW/$RREL" "warn=rules_not_ignored reason=exclude_unwritable path=$RW/$RREL"
+fi
+chmod 644 "$RW/.git/info/exclude"
+rp_repo "$RPD/s"; RS="$(cd "$RPD/s" && pwd -P)"; rp_file "$RPD/shared"; ln -s "$RPD/shared/.claude" "$RS/.claude"
+rp DCR16q-check-ignore-failed "$RPD/s" "rules=tree path=$RS/$RREL" "warn=rules_not_ignored reason=check_ignore_failed path=$RS/$RREL"
+dc DCR16m-usage-cwd-no-value 2 'usage:' rules-path --cwd
+dc DCR16n-usage-extra 2 'usage:' rules-path extra
 
 cat > "$DCD/pr.md" <<MD
 ## Summary
@@ -6319,6 +6503,40 @@ ac: empty
 ac_proposal:
 report: r
 TXT
+# DC22f–DC22i: project rules — the page-link waiver reads 'none — <why>'; pages_needed is a non-empty list; never both
+dc DC22f-receipt-page-links-waiver 0 'result=ok' receipt stt <<'TXT'
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+unconfirmed: []
+page_links: none — an admin-only change: no storefront page shows it
+report: r
+TXT
+dc DC22g-receipt-page-links-bad 1 "fail page_links is not 'none — <why>'" receipt stt <<'TXT'
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+unconfirmed: []
+page_links: skipped
+report: r
+TXT
+dc DC22h-receipt-pages-needed 0 'result=ok' receipt stt <<'TXT'
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+unconfirmed: []
+pages_needed:
+  - elc-us-mc-uat.myshopify.com: a product with 3+ shades where 1 is sold out
+report: r
+TXT
+dc DC22i-receipt-pages-needed-and-waiver 1 'fail pages_needed with page_links: none' receipt stt <<'TXT'
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+unconfirmed: []
+page_links: none — no page
+pages_needed:
+  - elc-us-mc-uat.myshopify.com: a product
+report: r
+TXT
+dc DC22j-receipt-pages-needed-empty 1 'fail pages_needed empty' receipt stt <<'TXT'
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+unconfirmed: []
+pages_needed:
+report: r
+TXT
 dc DC23-receipt-pr-no-title 1 'fail title empty' receipt pr <<'TXT'
 written: /repo/.claude/tasks/ELC-1/pr-body.md
 pr_summary: |
@@ -6438,6 +6656,24 @@ printf 'PR: https://github.com/o/r/pull/12 — t\nmode: jira\n' > "$DCD/jira-bri
 dc DC43-jira-brief-text 1 'fail brief text in the comment' file jira "$DCD/jira-briefkey.md"
 printf 'PR: https://github.com/o/r/pull/12 — t\nCo-Authored-By: Claude <noreply@anthropic.com>\n' > "$DCD/jira-attr.md"
 dc DC44-jira-attribution 1 'fail AI attribution' file jira "$DCD/jira-attr.md"
+# DC44a–DC44g: a GFM table only with --table (the developer asked for one); its rows are no brief lines
+{ cat "$DCD/jira-brief.md"; printf '\n| Icon | Change |\n| --- | --- |\n'; for n in 1 2 3 4 5 6 7 8; do printf '| icon-%s | re-pulled |\n' "$n"; done; } > "$DCD/jira-table.md"
+dc DC44a-jira-table-flag-ok 0 'brief_lines=3' file jira "$DCD/jira-table.md" --table
+grep -qx 'tables=1' "$DCD/out" && ok || bad DC44a-tables-count "$(tr '\n' ';' < "$DCD/out")"
+dc DC44b-jira-table-no-flag 1 "fail table in the comment" file jira "$DCD/jira-table.md"
+grep -qF 'fail brief longer than 6 lines' "$DCD/out" && bad DC44b-rows-counted "$(tr '\n' ';' < "$DCD/out")" || ok
+printf 'PR: https://github.com/o/r/pull/12 — t\n\n| Icon | Change |\n|---|---|\n| a | b |\n' > "$DCD/jira-table-only.md"
+dc DC44c-jira-table-no-brief-ok 0 'brief_lines=0' file jira "$DCD/jira-table-only.md" --table
+printf 'PR: https://github.com/o/r/pull/12 — t\n\n- Re-pulls the icons.\n| a | b |\n| c | d |\n' > "$DCD/jira-pipes.md"
+dc DC44d-jira-pipes-not-a-table 1 'fail brief line is not a bullet' file jira "$DCD/jira-pipes.md" --table
+grep -qx 'tables=0' "$DCD/out" && ok || bad DC44d-tables-zero "$(tr '\n' ';' < "$DCD/out")"
+printf 'PR: https://github.com/o/r/pull/12 — t\n\n- Adds a | b toggle.\n' > "$DCD/jira-pipe-bullet.md"
+dc DC44e-jira-pipe-in-bullet-ok 0 'tables=0' file jira "$DCD/jira-pipe-bullet.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n\n| Theme | Id |\n| --- | --- |\n| preview | 155512345678 |\n' > "$DCD/jira-table-rot.md"
+dc DC44f-jira-table-row-rots 1 'fail theme id' file jira "$DCD/jira-table-rot.md" --table
+dc DC44g-usage-stt-table 2 'usage:' file stt "$DCD/stt.md" --table
+printf 'PR: https://github.com/o/r/pull/12 — t\n- Adds the section.\ntable: the changed icons\n' > "$DCD/jira-briefkey-table.md"
+dc DC44h-jira-brief-table-key 1 'fail brief text in the comment' file jira "$DCD/jira-briefkey-table.md" --table
 dc DC45-receipt-jira-good 0 'kind=written' receipt jira <<'TXT'
 written: /w/.claude/tasks/ELC-1/jira-comment.md
 unconfirmed: []

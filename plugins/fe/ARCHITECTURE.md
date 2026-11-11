@@ -21,7 +21,11 @@ plugins/fe/
 ├── references/*.md              what fe's skills and agents read on demand (`<fe root>/references/…`);
 │                                drafter-loop.md is the one home of the drafter loop
 └── scripts/                     the store scripts, project-profile.sh, worktree-theme.sh, doctor.cjs,
-                                 drafter-check.cjs (a drafter's file and reply, checked in code)
+                                 drafter-check.cjs (a drafter's file and reply, checked in code; the stt
+                                 check also takes the project's local .claude/domaine/steps-to-test.md
+                                 through --project-rules, `rules <file> [--prose]` validates that file
+                                 alone, and `rules-path` resolves it: this tree, else the main checkout
+                                 of a linked worktree, kept out of git through info/exclude)
 ```
 
 The skills hand off to base by qualified names only (`/base:commit`, `base:jira-reader`, …) and cite

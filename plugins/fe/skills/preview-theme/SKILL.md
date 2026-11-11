@@ -61,7 +61,9 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
   `shopify theme push`.
 - A copy of another store's theme: `create --name "<name>" --duplicate-of <theme> --store <store>
   [--brand <b>]` (brand = a directory name under multi-brand/brands/, e.g. jo-malone, never a
-  ticket's short code); never run duplicate / build / push / poll by hand, the script owns that.
+  ticket's short code), never with `--reuse`: a copy is always a new theme and the script refuses the
+  pair (`error=duplicate_reuse_conflict`); a copy that exists already → refresh it. Never run
+  duplicate / build / push / poll by hand, the script owns that.
 - Neither: a preview-theme id for this ticket is already known (the workspace `notes.md`
   `session-theme: <id>` line **wins** — that is this work stream's theme, refresh it rather
   than creating a second one; then the conversation, the PR preview table, a preview URL's
@@ -93,13 +95,15 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
      `[ELC-299/307/309] Kever | Domaine`.
    - Else **ask** the developer for the name (or the ticket key(s) to derive it).
 3. **Say it, don't ask it.** An unpublished preview of this branch is reversible: say in one
-   line what runs (name, store, `--reuse`) and go on — the developer can still stop it. The
+   line what runs (name, store, `--reuse` or `--duplicate-of`) and go on — the developer can still stop it. The
    only asks are step 1's `count=0`, step 2's underivable name, step 4's unclear brand, and a
    same-named theme no workspace records (`<fe root>/references/session-theme.md` step 2 →
    Same-named theme first, checked before step 4).
 4. **Create.** Run `create-preview-theme.sh create --name "<name>" --reuse` (`--reuse` pushes
    into an existing same-named theme — the key and role name scope it to this ticket — instead
-   of stacking a second one; drop it only when the developer asks for a separate theme).
+   of stacking a second one; drop it only when the developer asks for a separate theme). The
+   copy of another store's theme (Route the mode) runs `create --name "<name>" --duplicate-of
+   <theme> --store <store>` **without** `--reuse`.
    The repo has `multi-brand/brands/` (`info` prints `brands=`) → add `--brand <b>`. b is the `brand=` on
    this theme's `session-theme:` line, else ask the developer which brand the store sells (a name
    from `brands=`) — never guessed from the store handle or a ticket's short code. Without it the script refuses to build (`error=brand_required`). The script runs

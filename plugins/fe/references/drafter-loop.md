@@ -17,6 +17,9 @@ Brief fields every drafter takes: `workspace:` (absolute) · `ticket:` · `branc
 `answers:` (every developer answer already collected, verbatim, each with its question) ·
 `mode: draft`. The skill step lists its own extra fields — `theme:` (a list, one entry per preview
 theme with its `note:`) is the PR drafter's only; the stt drafter never gets the session preview.
+The stt drafter's `project_rules:` is only the absolute path `drafter-check.cjs rules-path` printed
+(its rules: `<base root>/references/steps-to-test/project-rules.md`); `pages:` (a later turn) is the
+skill's pages list.
 
 ## Check every return in code
 Pipe the drafter's reply, unchanged, to
@@ -33,13 +36,16 @@ and stop.
 - `written: <path>` (+ `unconfirmed:`, `report:`, the stt drafter's optional `ac: empty` + `ac_proposal:`, the PR fields) → run
   `node <fe root>/scripts/drafter-check.cjs file <stt|pr|jira> "<path>"` (pr: the Theme preview table check
   is the default; add `--no-preview` only when `notes.md` holds the developer's recorded
-  `preview-decision: no preview` line — the script itself checks it); `fail` lines → SendMessage
+  `preview-decision: no preview` line — the script itself checks it; stt with `project_rules:`: add
+  `--project-rules <path>`, and `--no-page-link` only when the receipt carries `page_links: none — <why>`;
+  jira with a `table:` in the brief: add `--table`;
+  a receipt with `pages_needed:` gets the skill's pages step before this check); `fail` lines → SendMessage
   `revise:` + those lines; ok → the checkpoint. On the pr drafter's jira turn every `revise:` and
   `ask:` also carries `file: jira-comment.md` (that agent wrote `pr-body.md` too).
 - `error: …` → show it, fix the brief once, re-send.
 
-**Termination:** at most 2 ESCALATE rounds, 1 brief fix and 1 check-fix round per
-drafter. Past any cap, tell the developer what is still open and stop — never loop.
+**Termination:** at most 2 ESCALATE rounds, 1 brief fix, 1 pages round (stt with project rules) and 1
+check-fix round per drafter. Past any cap, tell the developer what is still open and stop — never loop.
 
 ## Never read the draft
 You never `Read`, `cat`, `head`, `tail`, `sed`, `grep` the text of, open, quote, summarise or

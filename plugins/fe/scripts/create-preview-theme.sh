@@ -91,7 +91,8 @@
 #         overwritten when the copy finishes), at most $FE_CPT_DUPLICATE_TIMEOUT s (default 300,
 #         `error=duplicate_timeout`, the copy is kept) → push CODE ONLY, as refresh does. The model
 #         stays branch code + customizer settings, here the source theme's, copied server-side
-#         (images and settings no overlay carries). No dev theme is read; `--reuse` is refused.
+#         (images and settings no overlay carries). No dev theme is read; `--reuse` is refused
+#         (`error=duplicate_reuse_conflict`).
 #       → theme_id=… name=… store=… env=… preview_url=… editor_url=… reused=false duplicate_of=<id>
 #         [pushed=…] built=… [brand=…] — no overlay= key
 #       `error=duplicate_failed`: the CLI exited non-zero (log= + stderr tail); or it exited 0 with a
@@ -1262,7 +1263,7 @@ case "$MODE" in
     require_theme_checkout
     vet_build_script
     if [ -n "$DUP_SRC" ]; then
-      [ "$REUSE" -eq 0 ] || fail "--duplicate-of always makes a new theme — drop --reuse (refresh --theme <id> re-pushes an existing copy)"
+      [ "$REUSE" -eq 0 ] || fail "duplicate_reuse_conflict — --duplicate-of always makes a new theme, so --reuse does not apply: drop --reuse (refresh --theme <id> re-pushes an existing copy); nothing was built or pushed"
       create_duplicate
       exit 0
     fi
