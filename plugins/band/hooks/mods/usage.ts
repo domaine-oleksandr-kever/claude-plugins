@@ -183,6 +183,8 @@ const SAME_COMPACTION_MS = 30_000
 let lastCompactMs = 0
 /** Set by every compaction, cleared by the next reading with a fill: until then no reading is read as another one. */
 let awaitingFill = false
+/** The fill a compaction replaced: the engine answers it until the next request, so a reading repeating it is no reading. */
+let preCompactFill: { pct: number; tokens: number | null } | null = null
 
 /**
  * Cold cache, the context from the engine's count (absent = no reading), one log line. The
@@ -196,6 +198,10 @@ async function applyCompaction($: $, trigger: string, tokensAfter?: number, toke
   lastCompactMs = now
   await update($, cache, c => ({ ...c, isCold: true }))
   if (same && tokensAfter === undefined) return
+  if (!same) {
+    const u = await read($, usage)
+    preCompactFill = u.ctxPct === null ? null : { pct: u.ctxPct, tokens: u.ctxTokens }
+  }
   await update($, usage, u => compactedUsage(u, tokensAfter))
   if (same) return
   const sizes = typeof tokensBefore === 'number' && typeof tokensAfter === 'number' ? ` ${fmtK(tokensBefore)} → ${fmtK(tokensAfter)}` : ''
@@ -213,6 +219,10 @@ let endpoint: BandRate[] = []
  */
 async function writeUsage($: $, next?: BandUsage): Promise<void> {
   if (next) {
+    if (preCompactFill !== null) {
+      if (next.ctxPct === preCompactFill.pct && next.ctxTokens === preCompactFill.tokens) next = { ...next, ctxPct: null, ctxTokens: null }
+      else preCompactFill = null
+    }
     measured = next.rates
     await inferCompaction($, next)
   }
@@ -225,7 +235,8 @@ async function writeUsage($: $, next?: BandUsage): Promise<void> {
 
 /**
  * A compaction read off a measured reading, for logins whose hooks never see the compact events (a Claude Team
- * login). The fill gone (the engine drops it until the next response) is applied as one; a fill below half of
+ * login) when band-compact.json is missing. The fill gone (the engine keeps the old fill after a compaction and
+ * drops it once the next request starts, until that response) is applied as one; a fill below half of
  * the last one, that moment missed, is only logged, as the response that measured it wrote the cache again.
  */
 async function inferCompaction($: $, next: BandUsage): Promise<void> {
@@ -325,13 +336,14 @@ async function refresh($: $): Promise<void> {
   const now = await $.clock.now()
   await update($, tick, () => now)
   await applyResume($, now)
+  await applyCompactFile($, now)
   await writeUsage($, withCost(toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits, r.cost] as const)))))
   void maybeFetchLimits($)
   // A pick in the dialog a bare `/model` opens is saved after the command returns.
   await syncSettingsModel($).catch(() => undefined)
 }
 
-/** A band-resume.json older than this when first seen belongs to an earlier start of the session id. */
+/** A band-resume.json or band-compact.json older than this when first seen belongs to an earlier start of the session id. */
 const RESUME_FRESH_MS = 60_000
 /** The band-resume.json last seen, as `<session id>@<atMs>`: each file applies once. */
 let resumeSeen: string | null = null
@@ -359,6 +371,32 @@ async function applyResume($: $, now: number): Promise<void> {
     if (((await read($, cache)).anchorMs ?? -Infinity) >= anchorMs) return
     const isCold = r.promptCacheLikelyExpired === true
     await update($, cache, c => ({ ...c, anchorMs, isCold }))
+  } catch {}
+}
+
+/** How long after a /compact returns band reads band-compact.json: hooks/resume.cjs writes it once the transcript holds the record. */
+const COMPACT_FILE_WAIT_MS = 2_000
+/** The band-compact.json last seen, as `<session id>@<atMs>`: each file applies once. */
+let compactSeen: string | null = null
+
+/**
+ * Applies `<log dir>/<session id>/band-compact.json`, which hooks/resume.cjs writes after a compaction from the
+ * transcript's compact record: the one report of it on a login whose mods see no compact event. A file within 30 s
+ * of a compaction already applied (the session.compact chain, a reading) is that one. Never throws.
+ */
+async function applyCompactFile($: $, now: number): Promise<void> {
+  try {
+    const sid = String(await $.session.id())
+    const dir = logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), sid)
+    if (dir === null) return
+    const r = JSON.parse(String(await $.fs.read(`${dir}/band-compact.json`))) as Record<string, unknown>
+    if (typeof r.atMs !== 'number') return
+    const key = `${sid}@${r.atMs}`
+    if (key === compactSeen) return
+    compactSeen = key
+    if (now - r.atMs > RESUME_FRESH_MS || Math.abs(r.atMs - lastCompactMs) < SAME_COMPACTION_MS) return
+    const count = (v: unknown) => (typeof v === 'number' && v >= 0 ? v : undefined)
+    await applyCompaction($, typeof r.trigger === 'string' ? r.trigger : 'reported', count(r.tokensAfter), count(r.tokensBefore))
   } catch {}
 }
 
@@ -504,6 +542,16 @@ export function registerUsage(on: On, options: PluginOptions): void {
       if (typeof answered === 'string' && answered && (await read($, model))?.replace(/\[1m\]$/, '') !== answered) await adoptModel($, answered)
     }
     return next(e)
+  })
+
+  // A /compact (typed, or band's own run) returns with its compaction done: its band-compact.json is read moments
+  // later, not at the next 30 s refresh. An auto compaction still waits for the refresh.
+  on('command.run', { command: 'compact' }, async ($, e, next) => {
+    const r = await next(e)
+    $.clock.after(COMPACT_FILE_WAIT_MS, () => {
+      void (async () => applyCompactFile($, await $.clock.now()))().catch(() => undefined)
+    })
+    return r
   })
 
   on('session.compact', async ($, e, next) => {

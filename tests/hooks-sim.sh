@@ -6863,7 +6863,8 @@ for p in qa be pm; do
   if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|/fe:|<fe root>" "$(dh_root "$p")/hooks/conventions-text.json"; then bad "DHt5-$p-no-legacy" "a legacy, host or other team-plugin name in $p's conventions-text.json"; else ok; fi
 done
 
-# BR: band resume.cjs — SessionStart resume|fork writes <log dir>/<sid>/band-resume.json and prints nothing.
+# BR: band resume.cjs — SessionStart resume|fork writes <log dir>/<sid>/band-resume.json, compact writes
+# band-compact.json from the transcript's last compact_boundary record; it prints nothing.
 BRS="$ROOT/plugins/band/hooks/resume.cjs"
 BRH="$TMP/band-resume-home"; rm -rf "$BRH"; mkdir -p "$BRH"
 br_run() { # <stdin-json> [VAR=val…] — stdout+stderr of the hook, its exit code in br_rc
@@ -6871,7 +6872,7 @@ br_run() { # <stdin-json> [VAR=val…] — stdout+stderr of the hook, its exit c
   BR_OUT="$(printf '%s' "$in" | env -u DOMAINE_LOG_DIR HOME="$BRH" "$@" node "$BRS" 2>&1)"; br_rc=$?
 }
 br_file() { node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write([j.source,typeof j.atMs,j.secondsSinceLastResponse,j.promptCacheLikelyExpired].join("|"))}catch{process.stdout.write("none")}' "$1"; }
-assert_eq BR0-wired "$(jq -r '.hooks.SessionStart[0].matcher + " " + .hooks.SessionStart[0].hooks[0].command' "$ROOT/plugins/band/hooks/hooks.json")" 'resume|fork node "${CLAUDE_PLUGIN_ROOT}/hooks/resume.cjs"'
+assert_eq BR0-wired "$(jq -r '.hooks.SessionStart[0].matcher + " " + .hooks.SessionStart[0].hooks[0].command' "$ROOT/plugins/band/hooks/hooks.json")" 'resume|fork|compact node "${CLAUDE_PLUGIN_ROOT}/hooks/resume.cjs"'
 br_run '{"session_id":"br-1","source":"resume","seconds_since_last_response":600,"prompt_cache_likely_expired":true}'
 assert_eq BR1-resume "$br_rc|$BR_OUT|$(br_file "$BRH/.claude/domaine/log/br-1/band-resume.json")" "0||resume|number|600|true"
 br_run '{"session_id":"br-2","source":"fork","seconds_since_last_response":60}'
@@ -6897,6 +6898,35 @@ assert_eq BR9-unwritable "$br_rc|$BR_OUT" "0|"
 BRN="$TMP/band-resume-nohome"; rm -rf "$BRN"; mkdir -p "$BRN"
 BR_OUT="$(cd "$BRN" && printf '%s' '{"session_id":"br-10","source":"resume","seconds_since_last_response":5}' | env -u HOME -u DOMAINE_LOG_DIR node "$BRS" 2>&1)"; br_rc=$?
 assert_eq BR10-no-home "$br_rc|$BR_OUT|$(find "$BRN" -name band-resume.json | wc -l | tr -d ' ')" "0||0"
+bc_file() { node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write([typeof j.atMs,j.trigger,j.tokensBefore,j.tokensAfter].join("|"))}catch{process.stdout.write("none")}' "$1"; }
+BRT="$TMP/band-compact-transcript.jsonl"
+br_iso() { node -e 'process.stdout.write(new Date(Date.now()+Number(process.argv[1])*1000).toISOString())' -- "$1"; } # <seconds from now>
+br_boundary() { printf '{"type":"system","subtype":"compact_boundary","timestamp":"%s","compactMetadata":{"trigger":"%s","preTokens":%s,"postTokens":%s}}\n' "$(br_iso "$1")" "$2" "$3" "$4"; }
+{
+  br_boundary -20 auto 100000 20000
+  br_boundary -1 manual 283928 39025
+  printf '%s\n' '{"type":"user","message":{"content":"summary that quotes \"compact_boundary\" as text"}}'
+  printf '%s\n' '{"type":"attachment","attachment":{"type":"skill_listing"}}'
+} > "$BRT"
+br_run "{\"session_id\":\"br-11\",\"source\":\"compact\",\"transcript_path\":\"$BRT\"}"
+assert_eq BR11-compact "$br_rc|$BR_OUT|$(bc_file "$BRH/.claude/domaine/log/br-11/band-compact.json")|$(br_file "$BRH/.claude/domaine/log/br-11/band-resume.json")" "0||number|manual|283928|39025|none"
+br_run '{"session_id":"br-12","source":"compact"}'
+assert_eq BR12-compact-no-transcript "$br_rc|$BR_OUT|$(bc_file "$BRH/.claude/domaine/log/br-12/band-compact.json")" "0||number|||"
+br_run "{\"session_id\":\"br-13\",\"source\":\"compact\",\"transcript_path\":\"$TMP/band-compact-missing.jsonl\"}"
+assert_eq BR13-compact-missing-transcript "$br_rc|$BR_OUT|$(bc_file "$BRH/.claude/domaine/log/br-13/band-compact.json")" "0||number|||"
+br_run '{"session_id":"br-14","source":"resume","seconds_since_last_response":5}'
+assert_eq BR14-resume-no-compact-file "$(bc_file "$BRH/.claude/domaine/log/br-14/band-compact.json")" "none"
+# BR15–BR16: the host appends this compaction's boundary after its SessionStart hooks; an earlier one is never read as it
+BRT2="$TMP/band-compact-stale.jsonl"; br_boundary -3600 auto 160000 31000 > "$BRT2"
+br_run "{\"session_id\":\"br-15\",\"source\":\"compact\",\"transcript_path\":\"$BRT2\"}"
+BC15="$BRH/.claude/domaine/log/br-15/band-compact.json"
+assert_eq BR15a-compact-stale-waits "$br_rc|$BR_OUT|$(bc_file "$BC15")" "0||none"
+br_boundary 0 manual 283928 39025 >> "$BRT2"
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do [ -s "$BC15" ] && break; sleep 0.25; done
+assert_eq BR15b-compact-fresh-boundary-later "$(bc_file "$BC15")" "number|manual|283928|39025"
+BRT3="$TMP/band-compact-stale-only.jsonl"; br_boundary -3600 auto 160000 31000 > "$BRT3"
+node "$BRS" --await-compact "$BRT3" "$(node -e 'process.stdout.write(String(Date.now()-60000))')" "$TMP/band-compact-br16.json" 300 </dev/null; br_rc=$?
+assert_eq BR16-compact-stale-only-nulls "$br_rc|$(bc_file "$TMP/band-compact-br16.json")" "0|number|||"
 
 echo "hooks sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then

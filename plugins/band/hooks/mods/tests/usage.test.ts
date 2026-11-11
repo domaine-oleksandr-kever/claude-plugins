@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { CLEAR_RESEED_MS, HOUR_MS, seedsTtl } from '../lib.ts'
-import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, logged, mainTurn, measure, ok, peek, peekCache, peekEvents, resumed, sibBase, start, test, world } from './world.tsx'
+import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, compacted, logged, mainTurn, measure, ok, peek, peekCache, peekEvents, resumed, sibBase, start, test, world } from './world.tsx'
 
 const debug = async ($: any): Promise<string> => (await $.command.run({ command: 'band-debug', args: '' })).text
 
@@ -154,6 +154,75 @@ describe('event log writers → band.events', () => {
     await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
     await measure($, { window: 200_000, percent: 15, tokens: 30_000 })
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual', 'compact manual 144k → 30k', 'compact inferred 144k → 30k'])
+  })
+
+  test('Team login: a compaction no event reports → band-compact.json at the next tick: the kept count, cache cold, one line; the old fill the engine still answers never comes back', async ($, on) => {
+    const { w, clock } = world(on)
+    await start($)
+    await measure($, { window: 1_000_000, percent: 28.3928, tokens: 283_928 })
+    await mainTurn($)
+    await clock.advance(30_000)
+    compacted(w, {}, T0 + 40_000)
+    await clock.advance(30_000)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual 284k → 39k'])
+    let p = await peek($)
+    expect([p.usage.ctxTokens, Math.round(p.usage.ctxPct), p.cache.isCold]).toEqual([39_025, 4, true])
+    await clock.advance(30_000)
+    p = await peek($)
+    expect([p.usage.ctxTokens, p.cache.isCold]).toEqual([39_025, true])
+    // The next request drops the old fill; its response measures the new one.
+    w.context = { window: 1_000_000 }
+    await clock.advance(30_000)
+    await measure($, { window: 1_000_000, percent: 9.7, tokens: 97_000 })
+    await mainTurn($)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual 284k → 39k'])
+    p = await peek($)
+    expect([p.usage.ctxTokens, p.cache.isCold]).toEqual([97_000, false])
+  })
+
+  test('band-compact.json without a record read → compact reported, ctx —; a file older than 60 s at first sight → nothing', async ($, on) => {
+    const { w, clock } = world(on)
+    await start($)
+    await measure($, { window: 200_000, percent: 40, tokens: 80_000 })
+    compacted(w, { trigger: null, tokensBefore: null, tokensAfter: null }, T0 - 61_000)
+    await clock.advance(30_000)
+    expect(await logged($)).toEqual(['session start · band 9.9.9'])
+    compacted(w, { trigger: null, tokensBefore: null, tokensAfter: null }, T0 + 30_000)
+    await clock.advance(30_000)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact reported'])
+    const p = await peek($)
+    expect([p.usage.ctxPct, p.cache.isCold]).toEqual([null, true])
+  })
+
+  test('a /compact: its band-compact.json applies 2 s after the command returns, not at the next refresh', async ($, on) => {
+    const { w, clock } = world(on)
+    on('command.run', { command: 'compact' }, async () => {
+      compacted(w, {}, T0)
+      return { text: '' }
+    })
+    await start($)
+    await measure($, { window: 1_000_000, percent: 28.3928, tokens: 283_928 })
+    await $.command.run({ command: 'compact', args: '', origin: { kind: 'composer' } } as any)
+    await clock.advance(1_000)
+    expect(await logged($)).toEqual(['session start · band 9.9.9'])
+    await clock.advance(1_000)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual 284k → 39k'])
+    expect([(await peek($)).usage.ctxTokens, (await peek($)).cache.isCold]).toEqual([39_025, true])
+    await clock.advance(30_000)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual 284k → 39k'])
+  })
+
+  test('personal login: session.compact and the band-compact.json the same compaction leaves log one line', async ($, on) => {
+    const { w, clock } = world(on)
+    await start($)
+    await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
+    w.compact = async () => ({ messages: KEPT, tokensBefore: 144_000, tokensAfter: 30_000 })
+    await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
+    compacted(w, { tokensBefore: 144_000, tokensAfter: 30_000 }, T0)
+    await clock.advance(30_000)
+    await clock.advance(30_000)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual 144k → 30k'])
+    expect((await peek($)).usage.ctxTokens).toBe(30_000)
   })
 
   test('a /model answer logs the new family once; the same answer again logs nothing', async ($, on) => {

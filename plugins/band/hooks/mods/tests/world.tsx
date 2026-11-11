@@ -260,7 +260,7 @@ export const mainTurn = ($: any, agentId?: string, model?: string) =>
     usage: { input_tokens: 1, output_tokens: 1, ...(model ? { model } : {}) },
   })
 
-/** The log dir band-resume.json sits under in `resumed`'s world (DOMAINE_LOG_DIR). */
+/** The log dir band-resume.json and band-compact.json sit under in `resumed`'s and `compacted`'s world (DOMAINE_LOG_DIR). */
 const LOG = '/log'
 
 /**
@@ -270,4 +270,10 @@ const LOG = '/log'
 export function resumed(w: any, over: Record<string, unknown> = {}, atMs = T0): void {
   w.vars.DOMAINE_LOG_DIR = LOG
   w.files[`${LOG}/s1/band-resume.json`] = JSON.stringify({ source: 'resume', atMs, secondsSinceLastResponse: 600, promptCacheLikelyExpired: false, ...over })
+}
+
+/** What hooks/resume.cjs writes after a compaction of session s1 at `atMs`, as `resumed` does for a resume. */
+export function compacted(w: any, over: Record<string, unknown> = {}, atMs = T0): void {
+  w.vars.DOMAINE_LOG_DIR = LOG
+  w.files[`${LOG}/s1/band-compact.json`] = JSON.stringify({ atMs, trigger: 'manual', tokensBefore: 283_928, tokensAfter: 39_025, ...over })
 }
