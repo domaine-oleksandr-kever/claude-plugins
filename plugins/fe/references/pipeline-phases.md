@@ -226,5 +226,5 @@ its brief says otherwise.
    `file jira`, never read it. Policy allows (`PR link` or `hand-off comment` yes) → spawn
    `base:jira-writer` (ticket — from the workspace `.claude/tasks/<work-id>/`, whose
    `ticket.md` the writer checks the key against · `comment` · that file) for the one
-   `addCommentToJiraIssue` write (`<base root>/references/jira-adf-write.md`);
+   `addOrEditJiraIssueComment` write (`<base root>/references/jira-adf-write.md`);
    policy forbids → report the `PR: <url> — <title>` line and the file's path for manual paste.

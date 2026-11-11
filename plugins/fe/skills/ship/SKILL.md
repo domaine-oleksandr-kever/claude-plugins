@@ -96,7 +96,7 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    thread polling **and** the `graphql` `resolveReviewThread` mutation), `gh pr ready`
    (the draft end-state flip), `<fe root>/scripts/*.sh`,
    `node "<base root>/scripts/md-to-adf.cjs"`, plus the policy-gated Atlassian
-   MCP writes (`editJiraIssue`, `addCommentToJiraIssue`) — and confirm with the developer
+   MCP writes (`editJiraIssue`, `addOrEditJiraIssueComment`) — and confirm with the developer
    that they're pre-approved (allowlisted in `settings.json`, or acceptEdits on — offer those
    entries or `/fewer-permission-prompts` if not). A permission prompt mid-run kills autonomy — fix
    this before the interview, not after the ✋.
