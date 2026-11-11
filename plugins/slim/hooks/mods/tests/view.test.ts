@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BAD_ARGS, INLINE, NO_VERDICT_WRITE, PLACEHOLDER, VIEW_DESC, noUrlText, headOf, mediaName, mediaProbe, replyText, scratchProbe } from '../view.ts'
+import { BAD_ARGS, DENIED_WRITE, INLINE, NO_VERDICT_WRITE, PLACEHOLDER, VIEW_DESC, noUrlText, headOf, mediaName, mediaProbe, replyText, scratchProbe } from '../view.ts'
 import { viewText } from '../events.ts'
 import { textKey } from '../node-hook.ts'
 
@@ -37,11 +37,15 @@ const REPLY = {
 }
 
 type Check = 'allow' | 'ask' | 'deny'
+/** The mode's decider on an ask (the dialog, the classifier): allow, deny with this text, or (alone) null for nobody to ask. */
+type Decider = 'allow' | { deny: string } | null
 type Opts = {
   reply?: Record<string, unknown> | ((stdin: any) => Record<string, unknown>)
   env?: Record<string, string>
   read?: Check
   write?: Check
+  /** Answers each ask the host's check on a call of slim's raises, in turn; the last one stands for the rest. */
+  decider?: Decider | Decider[]
   below?: (e: any) => unknown
   agents?: any[]
   answer?: string | null
@@ -52,7 +56,10 @@ function world(on: On, o: Opts = {}) {
   mock.clock(on, { now: 10_000 })
   mock.store(on)
   mock.env(on, o.env ?? {})
-  const w = { views: [] as any[], records: [] as any[], other: [] as Run[], calls: [] as any[], checks: [] as any[], regs: [] as any[], asked: [] as string[] }
+  const w = {
+    views: [] as any[], records: [] as any[], other: [] as Run[], calls: [] as any[], checks: [] as any[], callChecks: [] as any[], decided: [] as any[],
+    regs: [] as any[], asked: [] as string[],
+  }
   on('session.id', async () => ({ value: 'S' }))
   on('session.cwd', async () => ({ value: o.cwd ?? '/repo' }))
   on('session.root', async () => ({ value: o.root ?? '/repo' }))
@@ -61,11 +68,21 @@ function world(on: On, o: Opts = {}) {
     w.regs.push(e)
     return { value: { tool: `mcp__slim__${e.name}` } }
   })
+  // The rules answer slim's own query (no tool_use_id) and the host's check on each call slim makes alike.
   on('tool.check', async (_$, e) => {
-    w.checks.push(e)
-    const d = e.tool === 'Write' ? (o.write ?? 'allow') : (o.read ?? 'allow')
+    ;(e.tool_use_id === undefined ? w.checks : w.callChecks).push(e)
+    const d = e.tool === 'Write' ? (o.write ?? 'allow') : e.tool === 'Read' ? (o.read ?? 'allow') : 'allow'
     return d === 'deny' ? { decision: 'deny', reason: `${e.tool} denied by rule` } : { decision: d }
   })
+  const deciders = o.decider === undefined ? ['allow' as const] : Array.isArray(o.decider) ? o.decider : [o.decider]
+  if (deciders[0] !== null) {
+    on('classic.PermissionRequest', async (_$, e) => {
+      const d = deciders[Math.min(w.decided.length, deciders.length - 1)]
+      const input = e.tool_input as any
+      w.decided.push([e.tool_name, input?.file_path, input?.limit ?? input?.content])
+      return { decision: d === 'allow' || !d ? { behavior: 'allow' } : { behavior: 'deny', message: d.deny } }
+    })
+  }
   on('process.run', async (_$, e) => {
     const stdin = JSON.parse(e.init?.stdin ?? 'null')
     if (e.argv[2] === '--view') {
@@ -118,6 +135,7 @@ describe('V2 path', () => {
     const text = await view($, { path: '/repo/issues.json' })
     expect(w.checks).toEqual([{ tool: 'Read', input: { file_path: '/repo/issues.json' } }])
     expect(w.calls.map(c => [c.tool, c.file_path, c.limit])).toEqual([['Read', '/repo/issues.json', 1]])
+    expect(w.callChecks.map(c => [c.tool, c.input.file_path, typeof c.tool_use_id])).toEqual([['Read', '/repo/issues.json', 'string']])
     expect(w.views).toHaveLength(1)
     expect(w.views[0].stdin).toEqual({ v: 1, path: '/repo/issues.json', root: '/repo', cwd: '/repo', session_id: 'S' })
     expect(w.views[0].timeoutMs).toBe(120_000)
@@ -150,10 +168,19 @@ describe('V2 path', () => {
   })
 
   test('the Read check asks: a one-line Read opens the dialog; its deny is the answer', async ($, on) => {
-    const w = world(on, { read: 'ask', below: e => (e.tool === 'Read' ? { deny: 'user said no' } : { result: {} }) })
+    const w = world(on, { read: 'ask', decider: { deny: 'user said no' } })
     expect(await view($, { path: '/outside/a.json' })).toBe('user said no')
-    expect(w.calls.map(c => [c.tool, c.file_path, c.limit])).toEqual([['Read', '/outside/a.json', 1]])
+    expect(w.decided).toEqual([['Read', '/outside/a.json', 1]])
+    expect(w.calls).toEqual([])
     expect(w.views).toEqual([])
+  })
+
+  test('the Read check asks and nobody can be asked: the host\'s denial is the answer, no spawn', async ($, on) => {
+    const w = world(on, { read: 'ask', decider: null })
+    expect(await view($, { path: '/outside/a.json' })).toMatch(/^Permission to use Read has been denied/)
+    expect(w.calls).toEqual([])
+    expect(w.views).toEqual([])
+    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'read-denied' })
   })
 
   test('the Read check allows but a guard on the Read denies: its reason, no spawn', async ($, on) => {
@@ -195,6 +222,7 @@ describe('V2 path', () => {
   test('the Read check asks and the Read passes: the core runs', async ($, on) => {
     const w = world(on, { read: 'ask' })
     await view($, { path: '/outside/a.json' })
+    expect(w.decided).toEqual([['Read', '/outside/a.json', 1]])
     expect(w.views).toHaveLength(1)
   })
 
@@ -392,16 +420,38 @@ describe('V5 media', () => {
     const w = world(on, { write: 'ask' })
     await view($, { path: '/repo/shot.png' })
     expect(w.asked).toEqual([])
+    expect(w.decided).toEqual([['Write', '/repo/shot.1568.jpg', PLACEHOLDER]])
     expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.jpg', PLACEHOLDER]])
     expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.jpg' })
   })
 
-  test('the host denies the placeholder Write: its reason, no spawn', async ($, on) => {
-    const w = world(on, { write: 'ask', below: e => (e.tool === 'Write' ? { deny: 'Permission to write /repo/shot.1568.jpg was denied' } : readOk(e)) })
+  test('the mode\'s decider denies the placeholder Write: its reason, no spawn', async ($, on) => {
+    const w = world(on, { write: 'ask', decider: { deny: 'Permission to write /repo/shot.1568.jpg was denied' } })
     expect(await view($, { path: '/repo/shot.png' })).toBe(`Permission to write /repo/shot.1568.jpg was denied\n${NO_RESIZE}`)
+    expect(w.decided).toEqual([['Write', '/repo/shot.1568.jpg', PLACEHOLDER]])
+    expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1]])
     expect(w.asked).toEqual([])
     expect(w.views).toEqual([])
     expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied' })
+  })
+
+  test('nobody can be asked about the placeholder Write: the host\'s denial, the do-not-retry line, the Read line last', async ($, on) => {
+    const w = world(on, { write: 'ask', decider: null })
+    const lines = (await view($, { path: '/repo/shot.png' })).split('\n')
+    expect(lines[0]).toMatch(/^Permission to use Write has been denied\. IMPORTANT: You \*may\* attempt to accomplish this action using other tools/)
+    expect(lines.slice(1)).toEqual([DENIED_WRITE, NO_RESIZE])
+    expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1]])
+    expect(w.asked).toEqual([])
+    expect(w.views).toEqual([])
+    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied' })
+  })
+
+  test('the dontAsk wording of that denial takes the same line; another denial does not', async ($, on) => {
+    const dontAsk = 'Permission to use Write has been denied because Claude Code is running in don\'t ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat.'
+    const notGranted = 'Claude requested permissions to write to /repo/shot.1568.jpg, but you haven\'t granted it yet.'
+    world(on, { write: 'ask', decider: [{ deny: dontAsk }, { deny: notGranted }] })
+    expect(await view($, { path: '/repo/shot.png' })).toBe(`${dontAsk}\n${DENIED_WRITE}\n${NO_RESIZE}`)
+    expect(await view($, { path: '/repo/shot.png' })).toBe(`${notGranted}\n${NO_RESIZE}`)
   })
 
   test('the placeholder Write fails: refused write-failed, no spawn', async ($, on) => {
@@ -470,8 +520,9 @@ describe('V5 media', () => {
   })
 
   test('the host denies the second Write: refused write-denied, no writing spawn, no question', async ($, on) => {
-    const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, { deny: 'Permission to write /repo/shot.1568.jpg was denied' }]), reply: reuseThen(NOT_REUSED) })
+    const w = world(on, { write: 'ask', answer: 'Yes', decider: ['allow', { deny: 'Permission to write /repo/shot.1568.jpg was denied' }], below: taken([UNREAD[0]!]), reply: reuseThen(NOT_REUSED) })
     expect(await view($, { path: '/repo/shot.png' })).toBe(`Permission to write /repo/shot.1568.jpg was denied\n${NO_RESIZE}`)
+    expect(trail(w)).toEqual(STALE.slice(0, 3))
     expect(w.asked).toEqual([])
     expect(w.views.map(v => v.stdin.reuse)).toEqual([true])
     expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied' })
@@ -732,9 +783,10 @@ describe('V9 a scratch output and a view that could not resize', () => {
   })
 
   test('V-FAIL-1 the classifier gives the placeholder Write no verdict: the hint, the Read line last, the next Read passes', { plugins: [PEEK_IMAGE] }, async ($, on) => {
-    const w = world(on, { write: 'ask', below: (e: any) => (e.tool === 'Write' ? { deny: NO_VERDICT } : { result: { type: 'image' }, text: '' }) })
+    const w = world(on, { write: 'ask', decider: { deny: NO_VERDICT }, below: () => ({ result: { type: 'image' }, text: '' }) })
     const text = await view($, { path: 'a/shot.png' })
     expect(text.split('\n')).toEqual([NO_VERDICT, NO_VERDICT_WRITE, 'view could not resize a/shot.png — Read a/shot.png to see it as is'])
+    expect(w.decided).toEqual([['Write', '/repo/a/shot.1568.jpg', PLACEHOLDER]])
     expect(w.views).toEqual([])
     expect([await passed($, 'a/shot.png'), await passed($, '/repo/a/shot.png')]).toEqual([true, true])
   })

@@ -38,7 +38,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.17.3**.
+Current release: **slim v0.17.4**.
 
 ## Install
 
@@ -483,7 +483,9 @@ denied Read, `jq`/`out` on an image, an unfit copy name or a non-image) lets the
 image pass (by the path as given and its absolute form). Its reply ends with
 `view could not resize <path> — Read <path> to see it as is`, and a Write the auto-mode classifier
 gave no verdict adds a line that the host's retry advice does not apply to view: do not retry view
-on that file.
+on that file. A Write the host denies where nobody can be asked (dontAsk mode, a background
+subagent: `Permission to use Write has been denied …`, which invites other tools) adds a line that
+this advice does not apply to view: do not retry view on that file or write the copy another way.
 `SLIM_IMAGE_READ_MAX` raises the size or, at `0`, turns this deny off.
 
 ## Lookup

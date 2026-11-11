@@ -99,6 +99,11 @@ export function scratchProbe(probe: string): boolean {
 
 /** Added to a refusal whose reason is the host's auto-mode classifier giving the media Write no verdict. */
 export const NO_VERDICT_WRITE = "view: the host's retry advice does not apply to view — this mode gives the media copy's Write no verdict; do not retry view on this file"
+/**
+ * Added to a refusal whose reason is the host's denial of the media Write where nobody may be asked (dontAsk mode,
+ * a background subagent), which invites other tools.
+ */
+export const DENIED_WRITE = "view: the host's advice to try other tools does not apply to view — the media copy's Write is denied here; do not retry view on this file or write the copy another way"
 
 /** At most `maxLines` lines and `maxBytes` bytes from the top of `text`; a longer line is cut. */
 export function headOf(text: string, maxLines: number, maxBytes: number): string {
@@ -317,7 +322,7 @@ async function viewMedia($: $, path: string, a: Record<string, string>): Promise
   const o = await mediaRun($, path, a)
   if (o.decision !== 'refused' || NOT_RESIZE.has(String(o.reason)) || !IMAGE_EXT.has(nameParts(path).ext)) return o
   await passImage($, path)
-  const hint = /no verdict for Write/i.test(o.text) ? [NO_VERDICT_WRITE] : []
+  const hint = /no verdict for Write/i.test(o.text) ? [NO_VERDICT_WRITE] : /Permission to use Write has been denied/i.test(o.text) ? [DENIED_WRITE] : []
   return { ...o, text: [o.text, ...hint, `view could not resize ${path} — Read ${path} to see it as is`].join('\n') }
 }
 

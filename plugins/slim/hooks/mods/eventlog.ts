@@ -67,9 +67,10 @@ export function seedLines(text: string, session: string): Kept {
 type Sink = Kept & { session: string; path: string; version: string }
 
 // Module-local, so a hot reload starts from the file: the lines already on disk for this session.
-let sink: Promise<Sink | null> | null = null
+let sink: Sink | null = null
 let sinkSession = ''
-let writes: Promise<void> = Promise.resolve()
+// Each line's open, append and write run in turn, so a reopen reads the file only after every earlier line landed.
+let queue: Promise<void> = Promise.resolve()
 let toasted = ''
 
 /** slim's own plugin.json version, read once per sink, else `unknown`. */
@@ -93,28 +94,30 @@ async function openSink($: $, session: string): Promise<Sink | null> {
   return { ...kept, session, path, version: await version($) }
 }
 
-/** Appends the event's line to the session's file; never throws, one toast per session when a write fails. */
-async function logLine($: $, ev: SlimEvent): Promise<void> {
+/** Appends the event's line to the session's file, after every earlier line; never throws. */
+function logLine($: $, ev: SlimEvent): Promise<void> {
+  const run = queue.then(() => appendLine($, ev))
+  queue = run
+  return run
+}
+
+/** One line into the file; one toast per session when a write fails. */
+async function appendLine($: $, ev: SlimEvent): Promise<void> {
   let session = ''
   try {
     session = await $.session.id()
     // A start line reopens the file: the version is new, and a /clear or resume may find lines there.
     if (!sink || sinkSession !== session || ev.kind === 'start') {
       sinkSession = session
-      // After the queued writes: one still pending would land after the file was read.
-      sink = writes.then(() => openSink($, session)).catch(() => null)
+      sink = await openSink($, session).catch(() => null)
     }
-    const s = await sink
+    const s = sink
     if (!s) return
     // One start line per session, first: a /clear's new id has no session.start, a resumed id may have one on disk.
     if (ev.kind === 'start' && s.lines.some(l => l.includes('"kind":"start"'))) return
     if (ev.kind !== 'start' && !s.lines.length) keep(s, fileLine({ v: 1, atMs: ev.atMs, kind: 'start', text: `slim ${s.version}`, src: 'slim' }, s.version, session))
     keep(s, fileLine(ev, s.version, session))
-    const text = `${s.lines.join('\n')}\n`
-    // Queued, so an older snapshot never lands after a newer one.
-    const w = writes.then(() => $.fs.write(s.path, text))
-    writes = w.catch(() => {})
-    await w
+    await $.fs.write(s.path, `${s.lines.join('\n')}\n`)
   } catch (err) {
     if (toasted === session) return
     toasted = session
