@@ -128,7 +128,10 @@ viewports over all rows.
 
 The four-item field names data by its properties only (`a product with 3+ sizes, one sold out`): this
 run finds a catalog entity that has them, from step 2. An older field's `e.g.` handle starts at step 1
-(Older shapes above).
+(Older shapes above). A project whose Steps to Test rules set page links (base's
+`steps-to-test/project-rules.md`) puts a storefront link after the properties: that page is the first
+candidate, checked at step 3 — a match is used (`fixture: <path> (the field's link; <properties
+matched>)`), a miss is an **Observations** line and the search goes on from step 2.
 
 1. **Confirm it is missing** — `https://<domain>/products/<handle>.js` (a collection:
    `/collections/<handle>/products.json`) answers 404 on the unlocked storefront.
