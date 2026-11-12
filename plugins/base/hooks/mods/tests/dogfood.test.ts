@@ -11,7 +11,7 @@ const DIR = `${ROOT}/.claude/plugin-defects`
 const INDEX = `${HOME}/.claude/plugin-defects/index.md`
 const INSTALLED = `${HOME}/.claude/plugins/installed_plugins.json`
 const KNOWN = `${HOME}/.claude/plugins/known_marketplaces.json`
-const SCRIPT_CMD = 'node /home/dev/.claude/plugins/cache/domaine/base/0.9.0/scripts/md-to-adf.cjs in.md'
+const SCRIPT_CMD = 'node /home/dev/.claude/plugins/cache/domaine/base/0.9.0/scripts/shopify-validate.cjs in.md'
 const FAILED = { isError: true, result: 'Exit code 1\nError: bad input', text: 'Exit code 1\nError: bad input' }
 /** `error=` reasons the fe, base and be scripts print for a caller's mistake, a guard, a designed degrade or a credential not set up: silent. */
 const REFUSALS = [
@@ -41,11 +41,11 @@ const FAILURES = [
 const DEFECT = {
   plugin: 'base',
   kind: 'script',
-  title: 'md-to-adf drops tables',
-  path: 'scripts/md-to-adf.cjs:120',
+  title: 'shopify-validate drops tables',
+  path: 'scripts/shopify-validate.cjs:120',
   observed: 'the table is gone',
   expected: 'a table node',
-  reproduce: 'node scripts/md-to-adf.cjs t.md',
+  reproduce: 'node scripts/shopify-validate.cjs t.md',
   evidence: 'Error: no table',
   suspect: 'plugin',
 }
@@ -181,11 +181,11 @@ describe('plugin_defect', () => {
     const { calls } = await installedWorld($, on)
     await start($)
     const r = await report($)
-    const path = `${DIR}/${DATE}-base-md-to-adf-drops-tables.md`
-    expect(r.result).toStartWith(`Plugin defect: md-to-adf drops tables → ${path}`)
+    const path = `${DIR}/${DATE}-base-shopify-validate-drops-tables.md`
+    expect(r.result).toStartWith(`Plugin defect: shopify-validate drops tables → ${path}`)
     const body = calls.writes.find(x => x.path === path)!.text
     expect(body).toStartWith(`---\nplugin: base\nversion: "0.9.0"\nkind: script\nsuspect: plugin\ndate: ${DATE}\nsession: "s1"\nwork_id: null\n---\n`)
-    for (const part of ['# [base] md-to-adf drops tables', 'Path: scripts/md-to-adf.cjs:120', '## Observed\n\n```text\nthe table is gone\n```', '## Expected\n\n```text\na table node\n```', '## Reproduce\n\n```text\nnode scripts/md-to-adf.cjs t.md\n```', '## Evidence\n\n```text\nError: no table\n```']) {
+    for (const part of ['# [base] shopify-validate drops tables', 'Path: scripts/shopify-validate.cjs:120', '## Observed\n\n```text\nthe table is gone\n```', '## Expected\n\n```text\na table node\n```', '## Reproduce\n\n```text\nnode scripts/shopify-validate.cjs t.md\n```', '## Evidence\n\n```text\nError: no table\n```']) {
       expect(body).toContain(part)
     }
     expect(body).toContain(`- project root: ${ROOT}`)
@@ -195,8 +195,8 @@ describe('plugin_defect', () => {
     expect(body).not.toContain('claude.ai-synced')
     expect(body).toContain('- surfaces: terminal')
     expect(body).toContain('- Claude Code: 2.1.293')
-    expect(calls.writes.find(x => x.path === INDEX)!.text).toBe(`- ${DATE} base md-to-adf drops tables → ${path}\n`)
-    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['base: md-to-adf drops tables'])
+    expect(calls.writes.find(x => x.path === INDEX)!.text).toBe(`- ${DATE} base shopify-validate drops tables → ${path}\n`)
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['base: shopify-validate drops tables'])
     expect(calls.runs).toEqual([])
     expect(r.result).not.toContain('## Environment')
   })
@@ -317,7 +317,7 @@ describe('plugin_defect', () => {
     await start($)
     const r = await report($)
     expect(r.result).not.toContain('Index:')
-    expect(calls.writes.map(x => x.path)).toEqual([`${DIR}/${DATE}-base-md-to-adf-drops-tables.md`])
+    expect(calls.writes.map(x => x.path)).toEqual([`${DIR}/${DATE}-base-shopify-validate-drops-tables.md`])
     w.env.HOME = HOME
     w.writeDenied = [`${HOME}/`]
     const r2 = await report($)
@@ -341,8 +341,8 @@ describe('github', () => {
     w.run = argv => (argv[0] === 'gh' ? ran(0, 'Creating issue\nhttps://github.com/acme/claude-plugins/issues/7\n') : null)
     await start($)
     const r = await report($, { github: true })
-    const path = `${DIR}/${DATE}-base-md-to-adf-drops-tables.md`
-    expect(calls.runs.map(x => x.argv)).toEqual([['gh', 'issue', 'create', '--repo', 'acme/claude-plugins', '--title', '[base] md-to-adf drops tables', '--body-file', path]])
+    const path = `${DIR}/${DATE}-base-shopify-validate-drops-tables.md`
+    expect(calls.runs.map(x => x.argv)).toEqual([['gh', 'issue', 'create', '--repo', 'acme/claude-plugins', '--title', '[base] shopify-validate drops tables', '--body-file', path]])
     expect(r.result).toContain('GitHub issue: https://github.com/acme/claude-plugins/issues/7')
   })
 
@@ -374,9 +374,9 @@ describe('no surface draws', () => {
     gh(w)
     await start($)
     const r = await report($)
-    const path = `${DIR}/${DATE}-base-md-to-adf-drops-tables.md`
+    const path = `${DIR}/${DATE}-base-shopify-validate-drops-tables.md`
     const body = calls.writes.find(x => x.path === path)!.text
-    expect(r.result).toStartWith(`Plugin defect: md-to-adf drops tables → ${path}`)
+    expect(r.result).toStartWith(`Plugin defect: shopify-validate drops tables → ${path}`)
     expect(r.result).toContain('GitHub issue: https://github.com/acme/claude-plugins/issues/9')
     expect(r.result).toContain(['', '````markdown', body, '````'].join('\n'))
     expect(body).toContain('- surfaces: none (nothing draws)')
@@ -426,7 +426,7 @@ describe('subagents', () => {
     w.bash = () => FAILED
     await start($)
     expect((await $.tool.call({ tool: 'Bash', command: SCRIPT_CMD, agentId: 'a1' })).context).toEqual([NUDGE])
-    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: shopify-validate.cjs'])
     expect(armed(w)).toBeNull()
   })
 })
@@ -439,8 +439,8 @@ describe('nudge and stop', () => {
     const r = await bash($, SCRIPT_CMD)
     expect(r.context).toEqual([NUDGE])
     expect(NUDGE).toContain('(not among your tools: in your reply)')
-    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
-    expect(armed(w)).toBe('md-to-adf.cjs')
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: shopify-validate.cjs'])
+    expect(armed(w)).toBe('shopify-validate.cjs')
     await clock.advance(1000)
     await bash($, 'bash plugins/base/scripts/review-scope.sh')
     expect(armed(w)).toBe('review-scope.sh')
@@ -530,9 +530,9 @@ describe('nudge and stop', () => {
 
   t('a crash in the second plugin script of a compound line: nudge, event', async ($, on) => {
     const { w } = world(on, { env: ON })
-    w.bash = () => ({ isError: true, result: 'TypeError: boom\n    at Object.<anonymous> (/r/plugins/base/scripts/md-to-adf.cjs:40:3)' })
+    w.bash = () => ({ isError: true, result: 'TypeError: boom\n    at Object.<anonymous> (/r/plugins/base/scripts/shopify-validate.cjs:40:3)' })
     await start($)
-    const cmd = 'bash plugins/base/scripts/review-scope.sh --check && node plugins/base/scripts/md-to-adf.cjs < x.md; echo done'
+    const cmd = 'bash plugins/base/scripts/review-scope.sh --check && node plugins/base/scripts/shopify-validate.cjs < x.md; echo done'
     expect((await bash($, cmd)).context).toEqual([NUDGE])
     expect((await eventsOf($, 'defect')).length).toBe(1)
   })
@@ -541,7 +541,7 @@ describe('nudge and stop', () => {
     const { w } = world(on, { env: ON })
     w.bash = () => ({ isError: true, result: 'comment: denied by the Claude Code auto mode classifier\nPermission to x denied\nexit 1' })
     await start($)
-    expect((await bash($, 'node plugins/base/scripts/md-to-adf.cjs < comment.md')).context).toEqual([NUDGE])
+    expect((await bash($, 'node plugins/base/scripts/shopify-validate.cjs < comment.md')).context).toEqual([NUDGE])
   })
 
   for (const denial of [
@@ -564,7 +564,7 @@ describe('nudge and stop', () => {
     const { w } = world(on, { env: ON })
     w.bash = () => ({ result: 'This command requires approval' })
     await start($)
-    expect((await bash($, 'node /x/plugins/base/scripts/md-to-adf.cjs /nonexistent/x.md')).context ?? []).toEqual([])
+    expect((await bash($, 'node /x/plugins/base/scripts/shopify-validate.cjs /nonexistent/x.md')).context ?? []).toEqual([])
     expect(await eventsOf($, 'defect')).toEqual([])
     expect(armed(w)).toBeNull()
   })
@@ -573,15 +573,15 @@ describe('nudge and stop', () => {
     const { w } = world(on, { env: ON })
     w.bash = () => ({ isError: true, result: 'Error: Exit code 1\n\nfailed to open /nonexistent/x.md' })
     await start($)
-    expect((await bash($, 'node plugins/base/scripts/md-to-adf.cjs /nonexistent/x.md')).context).toEqual([NUDGE])
-    expect(unreported(w).map(e => [e.script, e.line])).toEqual([['md-to-adf.cjs', 'failed to open /nonexistent/x.md']])
+    expect((await bash($, 'node plugins/base/scripts/shopify-validate.cjs /nonexistent/x.md')).context).toEqual([NUDGE])
+    expect(unreported(w).map(e => [e.script, e.line])).toEqual([['shopify-validate.cjs', 'failed to open /nonexistent/x.md']])
   })
 
   t('a base die behind the host\'s `Error: Exit code 1` line is a designed refusal: no nudge, no block', async ($, on) => {
     const { w } = world(on, { env: ON })
-    w.bash = () => ({ isError: true, result: "Error: Exit code 1\nmd-to-adf: cannot read input: ENOENT: no such file or directory, open '/nonexistent/x.md'" })
+    w.bash = () => ({ isError: true, result: "Error: Exit code 1\nshopify-validate: cannot read input: ENOENT: no such file or directory, open '/nonexistent/x.md'" })
     await start($)
-    expect((await bash($, 'node plugins/base/scripts/md-to-adf.cjs /nonexistent/x.md')).context ?? []).toEqual([])
+    expect((await bash($, 'node plugins/base/scripts/shopify-validate.cjs /nonexistent/x.md')).context ?? []).toEqual([])
     expect(armed(w)).toBeNull()
   })
 
@@ -589,9 +589,9 @@ describe('nudge and stop', () => {
     const { w } = world(on, { env: ON })
     w.bash = () => FAILED
     await start($)
-    expect((await bash($, 'cd /repo && node plugins/base/scripts/md-to-adf.cjs in.md 2>&1')).context).toEqual([NUDGE])
-    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
-    expect(armed(w)).toBe('md-to-adf.cjs')
+    expect((await bash($, 'cd /repo && node plugins/base/scripts/shopify-validate.cjs in.md 2>&1')).context).toEqual([NUDGE])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: shopify-validate.cjs'])
+    expect(armed(w)).toBe('shopify-validate.cjs')
   })
 
   t('a designed refusal (base die, fe error= line) gets no nudge, no event, no block', async ($, on) => {
@@ -657,8 +657,8 @@ describe('nudge and stop', () => {
     w.bash = () => ({ isError: true, result: 'Exit code 5\nerror=gql_errors log=x' })
     await start($)
     expect((await bash($, 'bash /root/.claude/plugins/synced/acct_user/fe~g2/scripts/theme-json.sh get')).context).toEqual([NUDGE])
-    expect((await bash($, 'node /home/dev/.claude-work/plugins/cache/domaine/base/0.12.0/scripts/md-to-adf.cjs x.md')).context).toEqual([NUDGE])
-    expect(unreported(w).map(e => e.script)).toEqual(['theme-json.sh', 'md-to-adf.cjs'])
+    expect((await bash($, 'node /home/dev/.claude-work/plugins/cache/domaine/base/0.12.0/scripts/shopify-validate.cjs x.md')).context).toEqual([NUDGE])
+    expect(unreported(w).map(e => e.script)).toEqual(['theme-json.sh', 'shopify-validate.cjs'])
   })
 
   t('a compound line the script does not end, failing with a refusal line and no Error: silent', async ($, on) => {
@@ -689,8 +689,8 @@ describe('the dogfood-state.json mirror', () => {
     expect(w.files[FILE]!.text).toBe('{"sid":"s1","failMs":0,"script":"","reportMs":0,"errors":[]}\n')
     await clock.advance(1000)
     await bash($, SCRIPT_CMD)
-    const first = { script: 'md-to-adf.cjs', line: 'Error: bad input', ms: NOW + 1000 }
-    expect(mirrored(w)).toEqual({ sid: 's1', failMs: NOW + 1000, script: 'md-to-adf.cjs', reportMs: 0, errors: [first] })
+    const first = { script: 'shopify-validate.cjs', line: 'Error: bad input', ms: NOW + 1000 }
+    expect(mirrored(w)).toEqual({ sid: 's1', failMs: NOW + 1000, script: 'shopify-validate.cjs', reportMs: 0, errors: [first] })
     await clock.advance(1000)
     await bash($, 'bash plugins/fe/scripts/theme-json.sh get')
     expect(mirrored(w).errors).toEqual([first, { script: 'theme-json.sh', line: 'Error: bad input', ms: NOW + 2000 }])
@@ -719,7 +719,7 @@ describe('the dogfood-state.json mirror', () => {
     w.bash = () => FAILED
     await start($)
     expect((await bash($, SCRIPT_CMD)).context).toEqual([NUDGE])
-    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: shopify-validate.cjs'])
     expect(w.files[FILE]).toBeUndefined()
   })
 
@@ -804,7 +804,7 @@ describe('pure parts', () => {
   })
 
   test('pluginScript: repo and cache paths of the seven plugins only', () => {
-    expect(pluginScript(SCRIPT_CMD)).toBe('md-to-adf.cjs')
+    expect(pluginScript(SCRIPT_CMD)).toBe('shopify-validate.cjs')
     expect(pluginScript('bash plugins/base/scripts/review-scope.sh --x')).toBe('review-scope.sh')
     expect(pluginScript('"/r/plugins/qa/scripts/qa-stores.cjs" list')).toBe('qa-stores.cjs')
     expect(pluginScript('node plugins/acme/scripts/x.cjs')).toBeNull()
@@ -831,7 +831,7 @@ describe('pure parts', () => {
     expect(errorLine('Exit code 1\n  TypeError: boom\n    at x')).toBe('TypeError: boom')
     expect(errorLine('Exit code 1')).toBe('')
     expect(errorLine('Error: Exit code 1')).toBe('')
-    expect(errorLine('Error: Exit code 1\n\nmd-to-adf: cannot read input: ENOENT')).toBe('md-to-adf: cannot read input: ENOENT')
+    expect(errorLine('Error: Exit code 1\n\nshopify-validate: cannot read input: ENOENT')).toBe('shopify-validate: cannot read input: ENOENT')
     expect(errorLine('Exit code 2\nwarn: x\nTypeError: boom')).toBe('TypeError: boom')
     expect(errorLine(`Exit code 1\n${'y'.repeat(300)}`).length).toBe(160)
     expect(errorLine(`error=gql_errors ${'x'.repeat(300)}`).length).toBe(160)
@@ -914,9 +914,9 @@ describe('pure parts', () => {
   })
 
   test('designedRefusal: refusal error= lines, or a stem line without any, never with Error', () => {
-    expect(designedRefusal('md-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
-    expect(designedRefusal('Exit code 1\nmd-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
-    expect(designedRefusal('Error: Exit code 1\nmd-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
+    expect(designedRefusal('shopify-validate: no input file', 'shopify-validate.cjs')).toBe(true)
+    expect(designedRefusal('Exit code 1\nshopify-validate: no input file', 'shopify-validate.cjs')).toBe(true)
+    expect(designedRefusal('Error: Exit code 1\nshopify-validate: no input file', 'shopify-validate.cjs')).toBe(true)
     expect(designedRefusal('note=x\nerror=no_store', 'shopify-admin-gql.sh')).toBe(true)
     expect(designedRefusal('Exit code 3\nnote=engine=token\nerror=no_admin_token\nhint=Set SHOPIFY_ADMIN_TOKEN or run shopify app dev', 'shopify-admin-gql.sh')).toBe(true)
     expect(designedRefusal('note=engine=token\nerror=invalid_admin_token source=env', 'shopify-admin-gql.sh')).toBe(false)
@@ -926,9 +926,9 @@ describe('pure parts', () => {
     expect(designedRefusal('pin_error=refresh_unverifiable', 'create-preview-theme.sh')).toBe(false)
     expect(designedRefusal('error=push_failed\nError: ECONNRESET', 'push-theme.sh')).toBe(false)
     expect(designedRefusal('error=usage\nError: ECONNRESET', 'theme-json.sh')).toBe(false)
-    expect(designedRefusal('md-to-adf: Error: boom', 'md-to-adf.cjs')).toBe(false)
-    expect(designedRefusal('other-script: nope', 'md-to-adf.cjs')).toBe(false)
-    expect(designedRefusal('see md-to-adf: nope', 'md-to-adf.cjs')).toBe(false)
+    expect(designedRefusal('shopify-validate: Error: boom', 'shopify-validate.cjs')).toBe(false)
+    expect(designedRefusal('other-script: nope', 'shopify-validate.cjs')).toBe(false)
+    expect(designedRefusal('see shopify-validate: nope', 'shopify-validate.cjs')).toBe(false)
     expect(designedRefusal('aXb: nope', 'a.b.cjs')).toBe(false)
     expect(designedRefusal('a.b: nope', 'a.b.cjs')).toBe(true)
   })

@@ -319,6 +319,19 @@ describe('/base-doctor', () => {
     expect(out).toContain('PASS  connectors     Atlassian: ConnB')
   })
 
+  t("the claude.ai connector's work-login prefix claude_ai_Atlassian counts as a connector", async ($, on) => {
+    world(on, {
+      manifest: manifest(['atlassian']),
+      mcp: { atlassian: up('atlassian') },
+      tools: ['mcp__plugin_base_atlassian__getJiraIssue', 'mcp__claude_ai_Atlassian__getJiraIssue', 'mcp__claude_ai_Atlassian__addOrEditJiraIssueComment'],
+      run: () => ran(0, staticOut(GREEN)),
+    })
+    await start($)
+    const { text } = await doctor($)
+    expect(text).toMatch(/PASS {2}mcp:atlassian +connected as plugin:base:atlassian — claude_ai_Atlassian takes precedence\n/)
+    expect(text).toMatch(/PASS {2}connectors +Atlassian: claude_ai_Atlassian\n/)
+  })
+
   t('the tool list fails → the connectors row skips, the server rows stand', async ($, on) => {
     world(on, { manifest: manifest(['atlassian']), mcp: { atlassian: up('atlassian') }, toolsFail: true, run: () => ran(0, staticOut(GREEN)) })
     await start($)

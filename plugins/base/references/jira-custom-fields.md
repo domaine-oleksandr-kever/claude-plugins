@@ -20,23 +20,24 @@ The verified ID table and the ready-to-paste request shape live in
 
 ### Empty field vs. wrong ID — don't run discovery for an empty field
 
-A `null` value does **not** mean the ID is wrong. Verified against the live API:
+A field with no value does **not** mean the ID is wrong. On the Atlassian MCP v2 every requested
+custom field comes back under `fields.customFields` (measured 2026-11-12, ELC-1864):
 
-| Case                        | `names` map        | `fields` value | Meaning                        |
-| --------------------------- | ------------------ | -------------- | ------------------------------ |
-| Field exists, **filled**    | has the ID + label | ADF doc / text | use it                         |
-| Field exists, **empty**     | has the ID + label | `null`         | genuinely empty - **leave it** |
-| Field ID **does not exist** | **absent**         | **absent**     | wrong ID - go to **Step B**    |
+| Case                        | `customFields` entry                              | Meaning                        |
+| --------------------------- | ------------------------------------------------- | ------------------------------ |
+| Field exists, **filled**    | keyed by the field name, `{ "id", "value" }`      | use it                         |
+| Field exists, **empty**     | keyed by the field name, `{ "id" }` (no `value`)  | genuinely empty - **leave it** |
+| Field ID **does not exist** | keyed by the **raw id**, `{ "id" }`               | wrong ID - go to **Step B**    |
 
-(An unknown custom-field ID is **silently dropped** from both `names` and `fields` — no error is
-raised, so "absent from `names`" is the signal, not a failed request.)
+(An unknown custom-field ID raises no error: "keyed by its own id, no name resolved" is the signal,
+not a failed request.)
 
 So the decision rule:
 
-- ID **present in the `names` map** → the ID is correct. A `null` value just means the field is
-  empty on this ticket; **do not** fall through to Step B, just note it's empty.
-- ID **missing from the `names` map** → the ID is wrong / not on this site → fall through to
-  **Step B** to rediscover it.
+- ID keyed **by its field name** → the ID is correct. No `value` just means the field is empty on
+  this ticket; **do not** fall through to Step B, just note it's empty.
+- ID keyed **by itself** → the ID is wrong / not on this site → fall through to **Step B** to
+  rediscover it.
 
 > ⚠️ Note: an earlier version of the playbook mis-mapped Acceptance Criteria onto the Assumptions
 > field id. Take both ids from the `jira-field-ids.md` table, never from memory.
@@ -49,7 +50,7 @@ But:
 
 - A **different Atlassian site / space has completely different IDs** — never assume these IDs
   there.
-- A project may simply **not expose a given field** on its screens, so it returns `null` even
+- A project may simply **not expose a given field** on its screens, so it comes back with no value even
   though the ID is valid.
 
 In both cases, fall through to Step B to resolve the live IDs.
@@ -59,23 +60,23 @@ In both cases, fall through to Step B to resolve the live IDs.
 This was verified working — it's the source of the `jira-field-ids.md` table.
 
 1. Call `getJiraIssue` on a representative ticket with the required **`cloudId`** (the site
-   host, e.g. `meetdomaine.atlassian.net` — cloudId resolution: `jira-field-ids.md`),
-   **`expand: "names"`**, and either `fields: ["*all"]` or a broad custom-field range:
+   host, e.g. `meetdomaine.atlassian.net` — cloudId resolution: `jira-field-ids.md`) and either
+   `view: "evidence"` (fetches and maps every custom field) or a broad custom-field range:
 
    ```
-   cloudId: "<site host or UUID>", issueIdOrKey: "<KEY>",
-   fields: ["*all"], expand: "names"
+   cloudId: "<site host or UUID>", issueIdOrKey: "<KEY>", view: "evidence"
    // or, to keep the response smaller:
-   fields: ["customfield_10030", ..., "customfield_10060"], expand: "names"
+   fields: ["customfield_10030", ..., "customfield_10060"]
    ```
 
-2. The response includes a **`names` map** of `fieldId → human-readable label` (e.g.
-   `"customfield_XXXXX": "Acceptance Criteria"`). Scan it for the labels you need
+2. The response's `fields.customFields` maps each field's **name** to `{ "id", "value" }` (e.g.
+   `"Acceptance Criteria": { "id": "customfield_XXXXX", … }`). Scan it for the names you need
    ("Acceptance Criteria", "Assumptions", "Technical Approach", "Documentation Links",
-   "Steps to test") to resolve the live IDs.
+   "Steps to test") to resolve the live IDs; an entry keyed by its raw id is not a field here.
 
-3. Cross-check the `fields` values: AC / Assumptions / TA / Documentation Links are rich-text
-   (ADF) fields; a `null` value means the field is empty on that ticket, not that the ID is wrong.
+3. Cross-check the values: AC / Assumptions / TA / Documentation Links are rich-text fields (a
+   markdown string, or HTML when the response says `appliedContentFormat: "html"`); no `value`
+   means the field is empty on that ticket, not that the ID is wrong.
 
 4. Reuse the resolved IDs for the rest of the session.
 
@@ -84,33 +85,34 @@ This was verified working — it's the source of the `jira-field-ids.md` table.
    main session offers `/base:report-plugin-issue`. The IDs are site-wide, so fixing the
    table once spares every workflow from re-running discovery. Only edit on confirmation.
 
-> Tip: `fields: ["*all"]` returns a very large response, which slim compresses or stubs. Narrow the
+> Tip: `view: "evidence"` returns a large response, which slim compresses or stubs. Narrow the
 > original it names to the map you need rather than reading the whole payload. A stub's `full=`
-> file is the bare issue JSON — `mcp__slim__view({ path: "<that file>", jq: ".names" })` works on
-> it. A compressed result's `<<full=… original_result>>` file is the MCP content-block array, which
-> `view`'s `jq` cannot step into — unwrap it in Bash:
-> `jq -c '(if type=="array" then .[0].text|fromjson elif .content then .content[0].text|fromjson else . end) | .names' <that file>` (the same line reads a stub's file too).
+> file is the bare JSON — `mcp__slim__view({ path: "<that file>", jq: ".data.fields.customFields" })`
+> works on it. A compressed result's `<<full=… original_result>>` file is the MCP content-block
+> array, which `view`'s `jq` cannot step into — unwrap it in Bash:
+> `jq -c '(if type=="array" then .[0].text|fromjson elif .content then .content[0].text|fromjson else . end) | (.data // .) | .fields.customFields | map_values(.id)' <that file>` (the same line reads a stub's file too).
 
-## Parsing ADF responses — markdown when given, slim's adf engine when not
+## Reading rich-text values — markdown, HTML when the server says so
 
-Always request `responseContentFormat: "markdown"`. Then decide **per field** by the value's shape:
+Always request `responseContentFormat: "markdown"`. Then decide by the response:
 
-- **Already a string / markdown** → use it as-is. This is what `description` and `comment` return
-  under `markdown` format, and what every rich-text **custom** field becomes once slim has
-  compressed the response: slim's json engine runs its adf engine over every ADF document it meets,
-  so in a result over 4 KB AC, Assumptions, TA, Steps to test and Documentation Links arrive as
-  clean markdown (headings, marks, links, lists, code blocks, quotes, tables; inline-mark links and
-  `inlineCard` / `blockCard` / `embedCard` smart links as `<url>`).
-- **Still raw ADF** (a JSON object with `type: "doc"`) → the response was small (4 KB or less),
-  which slim leaves untouched; read the text and link nodes of that field directly. A field that is
-  `null` is genuinely empty — report it empty.
+- `appliedContentFormat: "markdown"` → every rich-text value (description, AC, Assumptions, TA,
+  Steps to test, Documentation Links) is a markdown string: use it as-is. This is what
+  `getJiraIssue` returned in every measured case (2026-11-12), an inline image included
+  (`![](blob:https://media…&id=<media id>&…)`, the media id only).
+- `appliedContentFormat: "html"` (with a `warning`) → a fallback, not a measured `getJiraIssue`
+  behaviour (the measured whole-page HTML switch is `listJiraIssueComments`', on an @mention,
+  media, a panel or a status): compact each value to markdown as `base:jira-reader` does its HTML
+  comment bodies (its prompt → Read the comments → HTML bodies).
+- A raw ADF object (`type: "doc"`) comes only from a server still on Atlassian's v1: read its text
+  and link nodes directly.
 
-No converter runs on the read side. The write side is `md-to-adf.cjs` (`jira-adf-write.md`).
+No converter script runs on the read side.
 
 ## Writing to a custom field
 
-The write side (converter usage, ADF compactness rules, `editJiraIssue` call shape) lives
-in **`jira-adf-write.md`** — writer skills read that file, not this one.
+The write side (the markdown call shapes, the empty-source rule, the read-back check) lives in
+**`jira-write.md`** — writer skills read that file, not this one.
 
 ## Fallback — Atlassian MCP unavailable
 

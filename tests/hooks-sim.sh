@@ -6280,17 +6280,17 @@ assert_eq DH10b-spare "$(cat "$DH/tmp/domaine-log/s-ag2/agents/b1.json") $(cat "
 # DH11: the dogfood Stop — blocks once per newest mirrored failure of this session with no report after it: the count and
 # each script with its first error line; the reason pinned.
 dh_home stop; SD="$(BLOG s-stop)"; mkdir -p "$SD"
-REASON='base: 3 plugin script error(s) this session are not reported — report each with plugin_defect or say why not: md-to-adf.cjs (Error: bad input), theme-json.sh (error=gql_errors log=x)'
-E1='{"script":"md-to-adf.cjs","line":"Error: bad input","ms":100}'
+REASON='base: 3 plugin script error(s) this session are not reported — report each with plugin_defect or say why not: shopify-validate.cjs (Error: bad input), theme-json.sh (error=gql_errors log=x)'
+E1='{"script":"shopify-validate.cjs","line":"Error: bad input","ms":100}'
 E2='{"script":"theme-json.sh","line":"error=gql_errors log=x","ms":%s}'
-# state <sid> <reportMs> [newest ms]: md-to-adf.cjs at 100, then theme-json.sh at the newest ms (default 100), then md-to-adf.cjs again
+# state <sid> <reportMs> [newest ms]: shopify-validate.cjs at 100, then theme-json.sh at the newest ms (default 100), then shopify-validate.cjs again
 state() { printf '{"sid":"%s","failMs":%s,"script":"theme-json.sh","reportMs":%s,"errors":[%s,%s,%s]}\n' "$1" "${3:-100}" "$2" "$E1" "$(printf "$E2" "${3:-100}")" "$E1" > "$SD/dogfood-state.json"; }
 stp() { DH_IN="{\"session_id\":\"s-stop\",\"stop_hook_active\":${1:-false}}"; DH_ENV="BASE_DOGFOOD=${2:-1}" dh base Stop; printf '%s' "$DH_OUT"; }
 assert_eq DH11-no-state "$(stp)" ""
 state s-other 0;      assert_eq DH11-other-session "$(stp)" ""
 printf '{"sid":"s-stop","failMs":0,"script":"","reportMs":0,"errors":[]}\n' > "$SD/dogfood-state.json"
 assert_eq DH11-no-failure "$(stp)" ""
-printf '{"sid":"s-stop","failMs":100,"script":"md-to-adf.cjs","reportMs":0}\n' > "$SD/dogfood-state.json"
+printf '{"sid":"s-stop","failMs":100,"script":"shopify-validate.cjs","reportMs":0}\n' > "$SD/dogfood-state.json"
 assert_eq DH11-no-list "$(stp)" ""
 state s-stop 100;     assert_eq DH11-reported "$(stp)" ""
 state s-stop 0;       assert_eq DH11-off "$(stp false 0)" ""
@@ -6339,16 +6339,16 @@ assert_eq DH11c-written-in-turn "$(ast)" ""
 setmt "$WS/notes.md" "$OLD"
 assert_eq DH11c-old-write "$(ast)" "$ABLOCK"
 rm -f "$AD/autosave-stop.json"
-printf '{"sid":"s-as","failMs":100,"script":"md-to-adf.cjs","reportMs":0,"errors":[%s]}\n' "$E1" > "$AD/dogfood-state.json"
+printf '{"sid":"s-as","failMs":100,"script":"shopify-validate.cjs","reportMs":0,"errors":[%s]}\n' "$E1" > "$AD/dogfood-state.json"
 DH_IN='{"session_id":"s-as","stop_hook_active":false}' DH_ENV="BASE_DOGFOOD=1" dh base Stop
-assert_eq DH11c-combined "$DH_OUT" "$(jq -cn --arg r "base: 1 plugin script error(s) this session are not reported — report each with plugin_defect or say why not: md-to-adf.cjs (Error: bad input)
+assert_eq DH11c-combined "$DH_OUT" "$(jq -cn --arg r "base: 1 plugin script error(s) this session are not reported — report each with plugin_defect or say why not: shopify-validate.cjs (Error: bad input)
 $AREASON" '{decision:"block",reason:$r}')"
 assert_eq DH11c-exit "$dh_rc" 0
 rm -f "$AD/autosave-stop.json" "$AD/dogfood-state.json" "$AD/dogfood-stop.json" "$WS/notes.md"
 as_state true "$SAV" 5; mkdir "$AD/autosave-stop.json"
-printf '{"sid":"s-as","failMs":100,"script":"md-to-adf.cjs","reportMs":0,"errors":[%s]}\n' "$E1" > "$AD/dogfood-state.json"
+printf '{"sid":"s-as","failMs":100,"script":"shopify-validate.cjs","reportMs":0,"errors":[%s]}\n' "$E1" > "$AD/dogfood-state.json"
 DH_IN='{"session_id":"s-as","stop_hook_active":false}' DH_ENV="BASE_DOGFOOD=1" dh base Stop
-assert_eq DH11c-autosave-fails-dogfood-kept "$DH_OUT" "$(jq -cn --arg r "base: 1 plugin script error(s) this session are not reported — report each with plugin_defect or say why not: md-to-adf.cjs (Error: bad input)" '{decision:"block",reason:$r}')"
+assert_eq DH11c-autosave-fails-dogfood-kept "$DH_OUT" "$(jq -cn --arg r "base: 1 plugin script error(s) this session are not reported — report each with plugin_defect or say why not: shopify-validate.cjs (Error: bad input)" '{decision:"block",reason:$r}')"
 rm -rf "$AD/autosave-stop.json" "$AD/dogfood-state.json" "$AD/dogfood-stop.json"
 printf '{"sid":"s-as","workId":"..","wsDir":"%s","stale":true,"mtimeMs":%s,"lastSavableMs":%s,"agentsSince":2,"editsSince":1,"turn":5,"startMs":%s}\n' "$DH/proj/.claude/tasks/.." "$OLD" "$SAV" "$TS0" > "$AD/autosave-state.json"
 assert_eq DH11c-dot-work-id "$(ast)" ""

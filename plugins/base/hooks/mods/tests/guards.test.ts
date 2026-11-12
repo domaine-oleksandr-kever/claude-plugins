@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { ATTRIBUTION_DENY, carriesAttribution } from '../guards/attribution.ts'
 import { NO_VERIFY_FALLBACK } from '../guards/bash.ts'
-import { JIRA_WRITES, NOTION_WRITES, V1_RENAMES, aliases, scopeRefusal, splitTool, twinServers, v2Name, writeRefusal } from '../guards/mcp.ts'
+import { JIRA_WRITES, NOTION_WRITES, V1_RENAMES, aliases, scopeRefusal, splitTool, twinServers, v1WriteRefusal, v2Name, writeRefusal } from '../guards/mcp.ts'
 import { DENY_FALLBACK, guardNote } from '../guards/scratch.ts'
 import { NOW, PEEK, SLIM_VIEW, eventsOf, peek, ran, start, world } from './world.ts'
 
@@ -307,6 +307,8 @@ describe('MCP guard: helpers', () => {
     expect(twinServers(names, 'notion-mcp')).toEqual(['D'])
     expect(twinServers(names, 'figma-dev-mode')).toEqual([])
     expect(twinServers(names, 'playwright')).toEqual([])
+    const connectors = ['mcp__claude_ai_Atlassian__getJiraIssue', 'mcp__claude_ai_Atlassian_Rovo_2__getJiraIssue', 'mcp__Atlassian_Rovo__getJiraIssue']
+    expect(twinServers([OWN_GET, ...connectors], 'atlassian')).toEqual(['claude_ai_Atlassian', 'claude_ai_Atlassian_Rovo_2', 'Atlassian_Rovo'])
   })
 
   test('writeRefusal: readers and an unknown type get no write, the writer its two, any other type all', () => {
@@ -328,6 +330,7 @@ describe('MCP guard: helpers', () => {
     expect(writeRefusal(null, 'getJiraIssue', 'f')).toBeNull()
     expect(writeRefusal('base:jira-reader', 'notion-fetch', 'f')).toBeNull()
     for (const tool of ['executeRead', 'discover', 'getConfluenceContent', 'listJiraIssueComments']) expect(writeRefusal('base:jira-reader', tool, 'f')).toBeNull()
+    for (const tool of ['getJiraIssue', 'listJiraIssueComments']) expect(writeRefusal('base:jira-writer', tool, 'f')).toBeNull()
   })
 
   test("writeRefusal: a v1 server's write names count as their v2 tools, its reads stay reads", () => {
@@ -351,6 +354,18 @@ describe('MCP guard: helpers', () => {
     expect(aliases('getJiraIssue')).toEqual(['getJiraIssue'])
     for (const v2 of new Set(Object.values(V1_RENAMES))) expect(V1_RENAMES[v2]).toBeUndefined()
     expect(new Set(JIRA_WRITES).size).toBe(JIRA_WRITES.length)
+  })
+
+  test("v1WriteRefusal: only the two markdown writes, only on a v1 server, only while base's own server serves them", () => {
+    const names = ['mcp__Old__addCommentToJiraIssue', 'mcp__Old__editJiraIssue', 'mcp__New__editJiraIssue',
+      'mcp__plugin_base_atlassian__editJiraIssue', 'mcp__plugin_base_atlassian__addOrEditJiraIssueComment']
+    expect(v1WriteRefusal('Old', 'editJiraIssue', 'f', names)).toContain('Old is on Atlassian MCP v1')
+    expect(v1WriteRefusal('Old', 'addCommentToJiraIssue', 'f', names)).toContain('call mcp__plugin_base_atlassian__addOrEditJiraIssueComment instead')
+    expect(v1WriteRefusal('New', 'editJiraIssue', 'f', names)).toBeNull()
+    expect(v1WriteRefusal('Old', 'transitionJiraIssue', 'f', names)).toBeNull()
+    expect(v1WriteRefusal('Old', 'getJiraIssue', 'f', names)).toBeNull()
+    expect(v1WriteRefusal('plugin_base_atlassian', 'editJiraIssue', 'f', [...names, 'mcp__plugin_base_atlassian__addCommentToJiraIssue'])).toBeNull()
+    expect(v1WriteRefusal('Old', 'editJiraIssue', 'f', names.slice(0, 3))).toBeNull()
   })
 
   test("scopeRefusal: base's reader and writer types reach only a server serving their vendor's tools; other types anything", () => {
@@ -433,25 +448,47 @@ describe('MCP guard: a connector takes precedence', () => {
   })
 
   t("a twin on the other Atlassian generation counts: base's v2 name against a v1 connector, and the reverse", async ($, on) => {
-    const own = 'mcp__plugin_base_atlassian__addOrEditJiraIssueComment'
+    const own = 'mcp__plugin_base_atlassian__listJiraIssueTransitions'
     const old = 'mcp__plugin_base_atlassian__getConfluencePage'
-    const { calls } = world(on, { tools: [...TWIN_TOOLS, own, old, 'mcp__ConnA__addCommentToJiraIssue', 'mcp__ConnA__getConfluenceContent'] })
+    const { calls } = world(on, { tools: [...TWIN_TOOLS, own, old, 'mcp__ConnA__getTransitionsForJiraIssue', 'mcp__ConnA__getConfluenceContent'] })
     expect((await call($, own)).deny).toBe(
-      `${own}: mcp__ConnA__addCommentToJiraIssue serves the same tool and takes precedence — call mcp__ConnA__addCommentToJiraIssue instead; if that fails, call ${own} again (it is allowed after this one refusal)`,
+      `${own}: mcp__ConnA__getTransitionsForJiraIssue serves the same tool and takes precedence — call mcp__ConnA__getTransitionsForJiraIssue instead; if that fails, call ${own} again (it is allowed after this one refusal)`,
     )
     expect((await call($, old)).deny).toContain('call mcp__ConnA__getConfluenceContent instead')
     expect((await call($, own)).result).toBe('ok')
     expect(calls.below.length).toBe(1)
-    expect((await eventsOf($, 'guard')).map(ev => ev.text)).toEqual(['addOrEditJiraIssueComment: ConnA takes precedence', 'getConfluencePage: ConnA takes precedence'])
+    expect((await eventsOf($, 'guard')).map(ev => ev.text)).toEqual(['listJiraIssueTransitions: ConnA takes precedence', 'getConfluencePage: ConnA takes precedence'])
+  })
+
+  t("a v1 connector never takes precedence over base's two markdown writes; its own markdown write is refused toward base's", async ($, on) => {
+    const own = 'mcp__plugin_base_atlassian__addOrEditJiraIssueComment'
+    const ownEdit = 'mcp__plugin_base_atlassian__editJiraIssue'
+    const { w, calls } = world(on, { env: { HOME }, tools: [...TWIN_TOOLS, own, ownEdit, 'mcp__ConnA__addCommentToJiraIssue'] })
+    agents(w, { a2: 'base:jira-writer' })
+    expect((await call($, own)).result).toBe('ok')
+    expect((await call($, ownEdit, 'a2')).result).toBe('ok')
+    expect(calls.below.length).toBe(2)
+    expect((await call($, 'mcp__ConnA__editJiraIssue', 'a2')).deny).toBe(
+      `base: mcp__ConnA__editJiraIssue refused: ConnA is on Atlassian MCP v1, which takes no markdown write to a rich-text field — call ${ownEdit} instead`,
+    )
+    expect((await call($, 'mcp__ConnA__addCommentToJiraIssue')).deny).toContain(`call ${own} instead`)
+    expect((await call($, TWIN_GET)).result).toBe('ok')
+    expect((await eventsOf($, 'guard')).map(ev => ev.text)).toEqual(['editJiraIssue: ConnA is on Atlassian v1', 'addCommentToJiraIssue: ConnA is on Atlassian v1'])
+  })
+
+  t("a v1 connector's markdown write runs when base's own server does not serve the tool", async ($, on) => {
+    const { calls } = world(on, { tools: [...TWIN_TOOLS, 'mcp__ConnA__addCommentToJiraIssue'] })
+    expect((await call($, 'mcp__ConnA__editJiraIssue')).result).toBe('ok')
+    expect(calls.below.length).toBe(1)
   })
 
   t('the same name on the twin wins over its other-generation name; a 2:1 rename finds no twin', async ($, on) => {
     const own = 'mcp__plugin_base_atlassian__createConfluenceComment'
     const { calls } = world(on, {
-      tools: [...TWIN_TOOLS, own, 'mcp__plugin_base_atlassian__addOrEditJiraIssueComment', 'mcp__ConnA__addCommentToJiraIssue',
-        'mcp__ConnA__addOrEditJiraIssueComment', 'mcp__ConnA__createConfluenceFooterComment', 'mcp__ConnA__createConfluenceInlineComment'],
+      tools: [...TWIN_TOOLS, own, 'mcp__plugin_base_atlassian__listJiraIssueTransitions', 'mcp__ConnA__getTransitionsForJiraIssue',
+        'mcp__ConnA__listJiraIssueTransitions', 'mcp__ConnA__createConfluenceFooterComment', 'mcp__ConnA__createConfluenceInlineComment'],
     })
-    expect((await call($, 'mcp__plugin_base_atlassian__addOrEditJiraIssueComment')).deny).toContain('call mcp__ConnA__addOrEditJiraIssueComment instead')
+    expect((await call($, 'mcp__plugin_base_atlassian__listJiraIssueTransitions')).deny).toContain('call mcp__ConnA__listJiraIssueTransitions instead')
     expect((await call($, own)).result).toBe('ok')
     expect(calls.below.length).toBe(1)
   })

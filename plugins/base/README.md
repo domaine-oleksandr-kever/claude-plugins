@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.24.0**.
+Current release: **base v0.25.0**.
 
 ## Status
 
@@ -85,7 +85,7 @@ does not resolve.
 | `base:jira-reader` | reads one ticket — fields, comments, attachments — writes `ticket.md` and `comments.md` to the workspace; downloads images and recordings (into the workspace, else `.claude/base-tmp/<KEY>/`), resizes them through slim's `view` | sonnet |
 | `base:figma-reader` | reads one Figma node through a Figma MCP or the REST API, writes `figma-<node-id>.md`; the REST tree is compacted by slim's `view` | sonnet |
 | `base:doc-reader` | reads one linked doc (Notion, Confluence, web) and writes a task-focused extract | sonnet |
-| `base:jira-writer` | writes one approved value to one Jira field or comment, converted to ADF, and reads it back | sonnet |
+| `base:jira-writer` | writes one approved value to one Jira field or comment, sent as markdown verbatim, and reads it back | sonnet |
 | `base:bug-hunter` | adversarial correctness review of the branch's diff | opus |
 | `base:change-reviewer` | comment accuracy, refactors and rule conformance on the changed files; the `profile` and its team rules come in the brief | opus |
 
@@ -114,7 +114,7 @@ that every cited path exists.
 | `references/jira-freshness-check.md` | `base:jira-reader`'s cached-ticket check (changelog first, comment-only refresh) |
 | `references/jira-attachments.md` | the read-only Jira token, `scripts/jira-attachments.sh`, `scripts/external-screenshots.sh`, and the resize through `view` |
 | `references/jira-reader-attachments.md` | `base:jira-reader`'s download steps, read only when a ticket has attachments or linked screenshots |
-| `references/jira-adf-write.md` | writing ADF to a field or a comment, `scripts/md-to-adf.cjs`, the read-back check |
+| `references/jira-write.md` | writing markdown to a field or a comment, the empty-source rule, the read-back check |
 | `references/figma-rest.md` | the Figma source ladder, the REST token, `scripts/figma-rest.sh`, the compact tree through `view` |
 | `references/figma-reader-rest.md` | `base:figma-reader`'s rung-3 steps, read only when the ladder lands on REST |
 | `references/reading-linked-docs.md` | which links a caller reads and with which reader |
@@ -136,7 +136,6 @@ slim resizes and compacts.
 
 | Script | Run by | Does |
 |---|---|---|
-| `scripts/md-to-adf.cjs` | `base:jira-writer` | Markdown → ADF for a Jira field or comment |
 | `scripts/review-scope.sh` | `/base:pre-commit-review`, `/base:commit`, a team plugin's PR gate | the review scope and its `diff_hash` for the `.git/.base-review` marker: merge-base to working tree, untracked files included, build-dirtied rewrites kept out; `--check` prints one line `marker=fresh\|stale\|other-branch\|none` (the marker against this branch and scope) for `/base:commit`'s gate |
 | `scripts/worktree-setup.sh` | `/base:worktree` | creates or removes a sibling `git worktree` with its own branch and dev port, the `.claude/tasks` link back to the main checkout, and the `--copy` list |
 | `scripts/doctor.cjs` | `/base-doctor`, or by hand | the static install checks (below); `--json` for the command |
@@ -258,7 +257,8 @@ deny writes one `guard` line to `base.events`. The guards also check subagents' 
 |---|---|---|
 | no AI attribution | `Bash` | a `git … commit` whose message carries a Claude or Anthropic co-author trailer or a "Generated with Claude" line; a human `Co-Authored-By` passes |
 | no git-hooks bypass | `Bash` | `--no-verify` (`-n` on a commit) on commit, push, merge, pull, am and rebase in any spelling, a `core.hooksPath` or `HUSKY=0` override, an alias that carries the flag, and a command that removes, empties or rewrites a hook file before a commit; `hooks/no-verify-bypass.sh` decides, run only for a command naming a git verb |
-| MCP precedence | the tools of base's `atlassian`, `notion-mcp` and `figma-dev-mode` servers (`mcp__plugin_base_<server>__<tool>`), in the main loop and in subagents | the first call of such a tool in a session while a server that is no plugin's (a claude.ai connector, a user-scope server) lists both the same tool (under its Atlassian v1 or v2 name when the rename is one to one) and the server's signature tool (`getJiraIssue`, `notion-fetch`, `get_design_context`), so a shared generic name such as `search` or `authenticate` makes no twin: the deny names that tool to call instead, and the same call is allowed after this one refusal (`base.mcpSoft`), so a connector that needs sign-in strands nobody. A tool list that fails lets the call run |
+| MCP precedence | the tools of base's `atlassian`, `notion-mcp` and `figma-dev-mode` servers (`mcp__plugin_base_<server>__<tool>`), in the main loop and in subagents | the first call of such a tool in a session while a server that is no plugin's (a claude.ai connector, a user-scope server) lists both the same tool (under its Atlassian v1 or v2 name when the rename is one to one) and the server's signature tool (`getJiraIssue`, `notion-fetch`, `get_design_context`), so a shared generic name such as `search` or `authenticate` makes no twin: the deny names that tool to call instead, and the same call is allowed after this one refusal (`base.mcpSoft`), so a connector that needs sign-in strands nobody. A server still on Atlassian v1 (it lists a v1 name) is never the twin for `editJiraIssue` or `addOrEditJiraIssueComment`. A tool list that fails lets the call run |
+| v1 markdown writes | `editJiraIssue` and `addOrEditJiraIssueComment` (or the v1 `addCommentToJiraIssue`) on a server that is not base's and still lists an Atlassian v1 tool name, in the main loop and in subagents | every such call while base's own `atlassian` server serves the tool: v1 takes no markdown string for a rich-text field and may store the markup literally. The deny names base's v2 tool to call instead |
 | reader writes | the Atlassian write tools (Jira, JSM, Confluence, Bitbucket, Loom, Goals, Projects, Teams, Focus, Talent, Capacity Planning, Jira Align, Teamwork Graph) and the Notion write tools of any MCP server (slim's and base's registered tools aside), in a subagent, `executeWrite` and `executeDestructive` among them, and the Atlassian v1 name of a renamed write | every write for `base:jira-reader`, `base:doc-reader` and `base:figma-reader`; every write but `editJiraIssue` and `addOrEditJiraIssueComment` for `base:jira-writer`; every write for a subagent with no `agents/<agent_id>.json` record (fail closed: the deny says `no agent-type marker for this subagent`); other agent types and the main loop are not limited. A probe of the file that fails lets the call run |
 | reader scope | every MCP tool but slim's and base's registered ones, in a subagent of base's reader or writer types | a call on a server that lists no signature tool of the agent's vendors: `getJiraIssue` for jira-reader and the writer, `getJiraIssue` or `notion-fetch` for doc-reader, `get_design_context` for figma-reader (base's own server of that vendor always counts), so a connector the session holds for other work (a store, a docs editor, a browser) stays out of reach of a reader fed untrusted text. A tool list that fails lets the call run |
 | storefront login | `browser_run_code_unsafe`, `browser_evaluate`, `evaluate_script` of any MCP server, in the main loop and in subagents | the first call in a session whose code fills or submits a storefront password gate (`.fill`, `.type`, a `.value =`, a form submit, a POST, a `password` FormData field): anywhere in code that names the gate (`storefront_password`, a `/password` form action, a `goto` or `fetch` to `/password`), or in the statement or variable that holds a password field (`[type=password]`, `[name=password]`, `#password`, `getByLabel` / `getByPlaceholder` / `getByRole('textbox', { name })` of Password; `/account/login` code is a customer login and runs), or on the element the call hands the code (`target` / `element` naming the password field, or an unnamed ref or `args` uid the code fills and submits): the deny carries the whole `references/storefront-login.md` route (`qa-stores.cjs … --field password`, the snapshot ref, `browser_type` / `fill`, verify) and no password; the guard line names the tool only, never the code. The next such call runs (`base.mcpSoft`), so no session is stuck. Code that only reads the page or checks `location.pathname` runs. Code loaded from a file (`filename`, `sourcePath`) is not read: a known ceiling |
@@ -594,7 +594,7 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `CLAUDE_PLUGIN_ROOT` | — | read, never set, by `hooks/conventions.cjs`: the plugin root the host runs the command hooks from, named in the root line (unset, the script's own parent); never used to find the config directory, as it can be a marketplace source folder |
 | `CLAUDE_CODE_ENTRYPOINT` | — | read, never set, by `hooks/conventions.cjs`: `sdk-*` (`claude -p`, the SDK) picks the dogfood rule for a session no surface draws |
 | `CLAUDE_CODE_REMOTE` | — | read, never set, by `hooks/conventions.cjs`: `true` (a claude.ai cloud session) picks the same rule |
-| `BASE_GUARD` | on | `0` turns every guard off: the attribution and git-hooks guards on Bash, the scratch-path guard, the MCP precedence and reader-write guards, and the edit-delegation refusal (the count stays) |
+| `BASE_GUARD` | on | `0` turns every guard off: the attribution and git-hooks guards on Bash, the scratch-path guard, the MCP precedence, v1 markdown-write and reader-write guards, and the edit-delegation refusal (the count stays) |
 | `BASE_LEAN` | on | `0` drops the lean-code convention from the `SessionStart` command hook (`start rules`) and from code-writing subagents (`SubagentStart`) |
 | `BASE_SCRATCH_GUARD` | on | `0` turns the scratch-path guard off: the browser tools write wherever their path points |
 | `BASE_STE` | on | `0` drops the writing-style convention (ASD-STE100) from the `SessionStart` command hook (`start rules`), and from the drafters' subagent share |
@@ -635,7 +635,6 @@ Agents never read `.env` themselves.
 | `tests/base-figma-rest-sim.sh` | `scripts/figma-rest.sh`: the token, the modes, `--policy`, the cache, retries, the out-dir gate |
 | `tests/base-storefront-overlay.mjs` | `scripts/storefront-overlay.js` in a vm on a stub DOM, loaded both ways the MCPs load it: the removals, the kept password gate, `covering` (open shadow roots included), every probe answer, a form's clobbered `.id`, and no login-guard `ACT` pattern in its code |
 | `tests/base-responsive-sweep.mjs` | `scripts/responsive-sweep.js` in a vm on a stub DOM, loaded both ways the MCPs load it: the width list, each finding kind and its false-positive guards, the selectors (a form's clobbered `.id`, `host >> element` in open shadow roots), the range table and its row and byte caps, and no login-guard `ACT` pattern in its code |
-| `tests/base-md-to-adf.mjs` | `scripts/md-to-adf.cjs`: the ADF it writes, the CLI contract, round trips through slim's adf engine |
 | `tests/hooks-sim.sh` (DH block) | `hooks/conventions.cjs` as the host runs each `hooks/hooks.json` command: the envelopes, the two start parts and their switches, the 9,000-character cap, the markers, the versions line, the rule variant, the login label, the edit-delegation section and marker field per login kind, the subagent share (drafters included) and its `agents/<agent_id>.json` record, the dogfood `Stop` block, the autosave `Stop` block and its combination with the dogfood one, the `precompact` line and `compact-marker.json`, the text file; `hooks/title.cjs` `start` and `prompt`: the corroborated key, the person's title kept, the one shot, the switch, a bad session id, the 100-byte cut |
 | `tests/helper-parity-sim.sh` | the helper copies across plugins, and `hooks/title.cjs`'s key helpers against `hooks/mods/workspace/workid.ts` by behaviour |
 | `tests/base-doctor-sim.sh` | `scripts/doctor.cjs` against sandbox plugin roots, homes, projects and log folders: every row's verdicts (the `delegate` row per login kind and override), `--json`, `--log-dir`, Windows |

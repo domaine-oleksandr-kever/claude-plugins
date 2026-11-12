@@ -156,6 +156,18 @@ export function scopeRefusal(type: string, server: string, full: string, names: 
   return `base: ${type} calls MCP tools only on a server that serves ${scope.map(k => SIGNATURE[k][0]).join(' or ')} — ${full} refused`
 }
 
+/**
+ * Why `full`, a markdown write (editJiraIssue, addOrEditJiraIssueComment, or a v1 name of one) on `server`, may not run
+ * while `names` are listed: that server speaks Atlassian v1, where a rich-text field takes no markdown string, and base's
+ * own v2 server serves the tool. Null when it may.
+ */
+export function v1WriteRefusal(server: string, tool: string, full: string, names: readonly string[]): string | null {
+  const v2 = v2Name(tool)
+  const own = `mcp__${OWN}atlassian__${v2}`
+  if (!WRITER_TOOLS.has(v2) || server.startsWith(OWN) || !onV1(names, server) || !names.includes(own)) return null
+  return `base: ${full} refused: ${server} is on Atlassian MCP v1, which takes no markdown write to a rich-text field — call ${own} instead`
+}
+
 /** events.ts's file writer reaches `$` through this: the validator follows `$` only within one file. */
 function diskOf($: $): Disk {
   return {
@@ -230,6 +242,7 @@ async function precedence($: $, full: string, name: { server: string; tool: stri
   let other = ''
   let twin = ''
   for (const s of twinServers(names, name.server.slice(OWN.length))) {
+    if (WRITER_TOOLS.has(v2Name(name.tool)) && onV1(names, s)) continue
     const tool = aliases(name.tool).find(t => names.includes(`mcp__${s}__${t}`))
     if (tool) {
       other = `mcp__${s}__${tool}`
@@ -265,6 +278,12 @@ export function registerMcpGuards(on: On): void {
     if (LOGIN_TOOLS.test(name.tool) && isLoginCall(e as unknown as Record<string, unknown>) && (await firstRefusal($, LOGIN_KEY))) {
       await logGuard($, `${name.tool}: storefront login code`)
       return { deny: loginDenyText($.plugin.root) }
+    }
+    const v1 = WRITER_TOOLS.has(v2Name(name.tool)) && !name.server.startsWith(OWN) ? await names() : null
+    const old = v1 ? v1WriteRefusal(name.server, name.tool, e.tool, v1) : null
+    if (old) {
+      await logGuard($, `${name.tool}: ${name.server} is on Atlassian v1`)
+      return { deny: old }
     }
     const list = name.server.startsWith(OWN) ? await names() : null
     const deny = list ? await precedence($, e.tool, name, list) : null

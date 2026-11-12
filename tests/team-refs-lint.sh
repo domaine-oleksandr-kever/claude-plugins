@@ -261,7 +261,7 @@ mkdir -p "$HUB/.claude-plugin" "$HUB/agents" "$HUB/skills/commit" "$HUB/skills/s
 printf '{ "name": "hub", "mcpServers": { "atlassian": {} } }\n' > "$HUB/.claude-plugin/plugin.json"
 printf -- '---\nname: jira-reader\ndescription: x\n---\n' > "$HUB/agents/jira-reader.md"
 printf -- '---\nname: figma-reader\ndescription: x\n---\n' > "$HUB/agents/figma-reader.md"
-: > "$HUB/references/task-workspace.md"; : > "$HUB/scripts/md-to-adf.cjs"
+: > "$HUB/references/task-workspace.md"; : > "$HUB/scripts/shopify-validate.cjs"
 printf '# hub\n\n## Environment switches\n\n| Variable | Default | Effect |\n|---|---|---|\n| `HUB_KNOWN` | on | x |\n' > "$HUB/README.md"
 mkdir -p "$KIT/.claude-plugin/types/hub" "$KIT/agents" "$KIT/skills/ship" "$KIT/skills/misdir" "$KIT/references" "$KIT/scripts"
 printf '{ "name": "kit", "dependencies": ["hub"] }\n' > "$KIT/.claude-plugin/plugin.json"

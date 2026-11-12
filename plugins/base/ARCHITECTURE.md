@@ -18,7 +18,7 @@ plugins/base/
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── hooks/no-verify-bypass.sh    the git-hooks guard's decision, run by guards/bash.ts
 ├── hooks/scratch-path-guard.cjs the scratch-path guard's decision, run by guards/scratch.ts
-├── scripts/*                    the fetchers, md-to-adf, worktree-setup, doctor, scratch-hygiene, shopify-validate, edit-delegation
+├── scripts/*                    the fetchers, worktree-setup, doctor, scratch-hygiene, shopify-validate, edit-delegation
 └── types/index.d.ts             base's $.state contract: the `base` key only
 ```
 
@@ -133,7 +133,7 @@ draws `base.progress` and its hints name `/base:save-task-context`; its Log pane
 | `scripts/scratch-hygiene.cjs` | deletes files: `$.fs` has no unlink |
 | `scripts/worktree-setup.sh` | git plumbing, port probes and `npm ci` the skill runs as one command |
 | `scripts/shopify-validate.cjs` | a CLI `/base:shopify` runs where the session loads no manifest MCP server: it spawns the dev-mcp server through `npx` and speaks stdio JSON-RPC to it |
-| `scripts/figma-rest.sh`, `jira-attachments.sh`, `external-screenshots.sh`, `md-to-adf.cjs` | the agents run a CLI on a file; credentials ride a private curl config, never the argv |
+| `scripts/figma-rest.sh`, `jira-attachments.sh`, `external-screenshots.sh` | the agents run a CLI on a file; credentials ride a private curl config, never the argv |
 
 A delegated script answers like a classic PreToolUse hook (JSON `permissionDecision` on stdout, or
 exit 2 with the reason on stderr); `node-hook.ts` builds the call and reads the answer, and a script

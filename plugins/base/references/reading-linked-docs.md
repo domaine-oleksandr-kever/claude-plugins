@@ -11,8 +11,8 @@ links, don't just collect them.
 
 From the `base:jira-reader` output use **`documentation_links`**, **`figma_urls`**, **`notion_urls`**,
 and **`other_links`**, plus any inline links inside `description` / `acceptance_criteria` /
-`technical_approach` (slim's adf engine preserves inline-mark links **and** block-level smart
-links — `inlineCard` / `blockCard` / `embedCard` — as `<url>`, so they survive into the text). De-duplicate, then read **all** of them — not only the Notion ones.
+`technical_approach` (a link survives into the text as `[text](url)`, `<url>` or a bare URL, and
+smart links too). De-duplicate, then read **all** of them — not only the Notion ones.
 
 **`comment_links` is the exception**: links a commenter pasted come back in their own list and
 never auto-spawn a reader — decide per ticket which one is worth following (a designer's updated

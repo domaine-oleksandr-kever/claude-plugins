@@ -10,8 +10,9 @@ the Bash tool's shell.
 ## Why a token at all
 
 The Atlassian MCP returns attachment **metadata** — id, filename, mimeType, size, author — and
-exposes no tool that returns the **bytes**. An image pasted into a comment is an ADF `media` node
-carrying a uuid and nothing else. The REST content endpoint does hold the bytes, but it is private
+exposes no tool that returns the **bytes**. An image pasted into a comment reads back as
+`![](blob:…&id=<media id>…)` in markdown, or an HTML media node with its `data-id` and file name —
+never the bytes. The REST content endpoint does hold the bytes, but it is private
 (401 unauthenticated, and a web-fetch tool refuses a private URL and would convert a PNG to
 markdown anyway), and the MCP's own OAuth token is not reusable: it lives in the host's credential
 store, is unreadable from a shell, short-lived, and scoped to the MCP session.
@@ -300,7 +301,7 @@ Slack token — the reader names it in `attachments_note` and moves on.
 
 No write scope was selected, so `POST`/`PUT`/`DELETE` come back **403**: no comment, no field
 edit, no transition, no delete, no attachment upload. Writes keep going through the MCP's own
-OAuth tools (`<plugin root>/references/jira-adf-write.md`) exactly as before. The token also sees
+OAuth tools (`<plugin root>/references/jira-write.md`) exactly as before. The token also sees
 only what that person can already see in Jira — it grants no project access of its own.
 
 ## Degradation — a missing token never fails a ticket read

@@ -2,8 +2,8 @@
 
 One section of the Steps to Test format; the index is `../steps-to-test-format.md`.
 
-- **One physical line per item and per bullet.** Never wrap: `md-to-adf --no-tables` reads a
-  continuation line as a new paragraph and splits the list. Fold a second sentence in or nest it.
+- **One physical line per item and per bullet.** Never wrap: the field is written as markdown verbatim,
+  and a continuation line can reach Jira as a line or a paragraph of its own and split the list. Fold a second sentence in or nest it.
 - **One ordered list, items 1–4**, numbered through. Nested bullets one level deep, under items 3 and 4
   only. No headings, tables, `✅` markers, accordion / expand blocks, troubleshooting or FAQ blocks — QA
   asks in the ticket.

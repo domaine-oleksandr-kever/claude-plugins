@@ -6,26 +6,27 @@ none of which touch the content fields the reader reports, though a new comment 
 screenshots it brings) is still ticket content the cache has to catch up with. Classify
 before re-reading the whole ticket:
 
-1. `getJiraIssue` with `cloudId: "meetdomaine.atlassian.net"`,
-   `fields: ["updated", "status", "comment", "attachment"]`, `expand: "changelog"`,
-   `responseContentFormat: "markdown"` — history, the comment field, whose **bodies you never read
-   here** (only its `total` and the newest `created`, both via `jq`), and the attachment metadata the
-   attachments step of step 3 is built on (ids, filenames, mime types — no bodies, so it is cheap).
-   Entries come **newest first**. The response is often huge, and slim hands it back compressed or
-   as a stub: run the `jq` lines below on the untouched original it names (the `<<full=<path>
-   original_result>>` handle, or the stub's `full=` line) — never pull the raw changelog or the
-   comment bodies into context. A small response comes back untouched; read it as-is. The
-   `original_result` file is the MCP content-block array (`[{"type":"text","text":"{…}"}]`), a
-   stub's `full=` file the bare issue JSON; each line starts by unwrapping the first shape and
-   passes the second through, so both work.
+1. Two reads, both with `cloudId: "meetdomaine.atlassian.net"`:
+   - `getJiraIssue` with `fields: ["updated", "status", "attachment"]`, `expand: "changelog"`,
+     `responseContentFormat: "markdown"` — history, and the attachment metadata the attachments
+     step of step 3 is built on (ids, filenames, mime types — no bodies, so it is cheap).
+     Changelog entries come **newest first**, one page only (`changelog.total` is the full count).
+   - `listJiraIssueComments` with `orderBy: "-created"`, `maxResults: 1` — the comment `total` and
+     the newest comment's `created`; the one **body it returns you never read** (`getJiraIssue` carries no
+     comments on v2).
+
+   The changelog response is often huge, and slim hands it back compressed or as a stub: run the
+   `jq` line below on the untouched original it names (the `<<full=<path> original_result>>`
+   handle, or the stub's `full=` line) — never pull the raw changelog into context. A small
+   response comes back untouched; read it as-is. The `original_result` file is the MCP
+   content-block array (`[{"type":"text","text":"{\"data\":…}"}]`), a stub's `full=` file the
+   bare JSON; the line unwraps the first shape and passes the second through, so both work.
 
    ```bash
    jq -r --arg since "<stored jira_updated>" \
-     '(if type=="array" then .[0].text|fromjson elif .content then .content[0].text|fromjson else . end)
+     '(if type=="array" then .[0].text|fromjson elif .content then .content[0].text|fromjson else . end) | (.data // .)
       | [.changelog.histories[] | select(.created > $since) | .items[].field]
       | group_by(.) | map("\(.[0]) ×\(length)") | join(", ")' <original-file>
-   jq -r '(if type=="array" then .[0].text|fromjson elif .content then .content[0].text|fromjson else . end)
-      | "comments=\(.fields.comment.total // 0) last=\(.fields.comment.comments[-1].created // "")"' <original-file>
    ```
 
    (Timestamps within one API response share a format, so string compare is safe.)
@@ -40,10 +41,10 @@ before re-reading the whole ticket:
    (or that file is missing while the ticket has comments) → **comment-only refresh**: run
    the comments step and the attachments step of your prompt, rewrite `comments.md` and
    `ticket.md`'s `## Attachments` section, leave every other cached field untouched, and
-   return. Step 1's response is the input for both — its comment bodies are markdown already (no
-   second field read here; restore every cut body and offloaded row from the original file with the
-   comment-restore `jq` line of your prompt (Read the comments), never write a `… [+N chars]` body), and
-   its `attachment` field is the metadata the attachments step decides on. The `comments` lines
+   return. The comments step reads every comment with `listJiraIssueComments` exactly as a full
+   read does (paged, HTML pages compacted, every cut body and offloaded row restored with the
+   comment-restore `jq` line of your prompt — never write a `… [+N chars]` body), and step 1's
+   `attachment` field is the metadata the attachments step decides on. The `comments` lines
    returned here follow the same
    rule as a full read — the first 160 characters of each comment **verbatim**, never
    paraphrased — and `comment_links` carries every URL they hold:
@@ -71,5 +72,5 @@ before re-reading the whole ticket:
    changed:            # the noise, e.g. "Sprint ×1, assignee ×4"
    ```
 5. **A content field changed** — or the changelog page doesn't reach back to the stored
-   timestamp (100+ entries since) → do the normal full read per your prompt, including the
+   timestamp (its oldest entry is newer than it while `changelog.total` exceeds the page) → do the normal full read per your prompt, including the
    workspace save (it overwrites the cached file).

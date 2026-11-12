@@ -1,7 +1,7 @@
 ---
 name: report-plugin-issue
 description: >
-  File a GitHub issue on the plugin repo when a base script, converter, guard, skill, reference,
+  File a GitHub issue on the plugin repo when a base script, guard, skill, reference,
   agent or the doctor fails or contradicts its docs. Use when a base component misbehaves or the
   user reports a plugin bug.
 argument-hint: "[one-line summary of the defect — inferred from the conversation if omitted]"
@@ -21,10 +21,10 @@ post without explicit approval.**
 
 File an issue only when the **plugin** is at fault:
 
-- a bundled script (`md-to-adf.cjs`, `figma-rest.sh`, `jira-attachments.sh`,
+- a bundled script (`figma-rest.sh`, `jira-attachments.sh`,
   `external-screenshots.sh`, `worktree-setup.sh`, `doctor.cjs`, `scratch-hygiene.cjs`) crashes, dies
   silently, produces wrong output, or reports a wrong/misleading `error=`;
-- a converter mangles content (broken tables/lists/marks, wrong field extracted);
+- a reader or the writer mangles content (broken tables/lists/marks, wrong field extracted);
 - a guard denies a command or a path it should allow, or lets through one it should deny (the
   attribution guard, the git-hooks guard `hooks/no-verify-bypass.sh`, the scratch-path guard
   `hooks/scratch-path-guard.cjs`);
@@ -44,7 +44,7 @@ such a condition badly (crashing instead of printing a clean `error=…`) is a p
 
 Gather what applies (skip the rest):
 
-- **Component + mode** — e.g. `md-to-adf.cjs --no-tables`, `worktree-setup.sh --remove`,
+- **Component + mode** — e.g. `jira-attachments.sh --ids`, `worktree-setup.sh --remove`,
   `guard:no-verify-bypass`, `skill:commit step 6`, `agent:jira-reader`.
 - **Install state** — ask the developer to run `/base-doctor` and keep its output: the static rows,
   slim as the session sees it, each MCP server's connection, and the tail of `base.events`

@@ -1,6 +1,6 @@
 ---
 name: jira-reader
-description: Reads ONE Jira ticket via the Atlassian MCP — fields, comments and attachments (images and screen recordings downloaded into the task workspace — else base's swept scratch root — and resized there by slim's `view`, linked prnt.sc / imgur screenshots fetched alongside) — and returns them compactly, keeping the raw ADF and the bytes out of the main context. Use PROACTIVELY whenever a whole ticket needs reading — e.g. when a Jira URL or key (ABC-123) is pasted. One per ticket, in parallel; skip tickets already in context. Writes `ticket.md` and `comments.md` itself when given the workspace path. NOT for single-field lookups or JQL searches — use the MCP directly. Read-only toward Jira. Needs the slim plugin.
+description: Reads ONE Jira ticket via the Atlassian MCP — fields, comments and attachments (images and screen recordings downloaded into the task workspace — else base's swept scratch root — and resized there by slim's `view`, linked prnt.sc / imgur screenshots fetched alongside) — and returns them compactly, keeping the raw payload and the bytes out of the main context. Use PROACTIVELY whenever a whole ticket needs reading — e.g. when a Jira URL or key (ABC-123) is pasted. One per ticket, in parallel; skip tickets already in context. Writes `ticket.md` and `comments.md` itself when given the workspace path. NOT for single-field lookups or JQL searches — use the MCP directly. Read-only toward Jira. Needs the slim plugin.
 model: sonnet
 effort: medium
 disallowedTools: Edit, NotebookEdit, Agent, Task, Skill, WebFetch, WebSearch, mcp__plugin_base_playwright, mcp__plugin_base_chrome-devtools-mcp, mcp__plugin_base_shopify-dev-mcp, mcp__plugin_base_figma-dev-mode, mcp__plugin_base_notion-mcp, mcp__plugin_base_atlassian__createJiraIssue, mcp__plugin_base_atlassian__editJiraIssue, mcp__plugin_base_atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__addOrEditJiraIssueComment, mcp__plugin_base_atlassian__addOrEditJiraIssueWorklog, mcp__plugin_base_atlassian__createJiraIssueLink, mcp__plugin_base_atlassian__manageJiraProjectVersion, mcp__plugin_base_atlassian__manageJiraProjectVersionRelatedWork, mcp__plugin_base_atlassian__manageJiraSprint, mcp__plugin_base_atlassian__createJiraBoard, mcp__plugin_base_atlassian__watchJiraIssue, mcp__plugin_base_atlassian__uploadAttachmentToJiraIssue, mcp__plugin_base_atlassian__editJiraEntityProperty, mcp__plugin_base_atlassian__createJiraIssueRemoteIssueLink, mcp__plugin_base_atlassian__convertJiraIssueHierarchy, mcp__plugin_base_atlassian__deleteJiraIssue, mcp__plugin_base_atlassian__deleteJiraComment, mcp__plugin_base_atlassian__deleteJiraIssueAttachment, mcp__plugin_base_atlassian__createJiraProject, mcp__plugin_base_atlassian__updateJiraProject, mcp__plugin_base_atlassian__updateJiraScreen, mcp__plugin_base_atlassian__updateJsmOpsAlert, mcp__plugin_base_atlassian__approveJsmRequestResolverPlans, mcp__plugin_base_atlassian__transitionJsmRequest, mcp__plugin_base_atlassian__createJsmRequest, mcp__plugin_base_atlassian__decideJsmRequestApproval, mcp__plugin_base_atlassian__setJsmAgentAvailability, mcp__plugin_base_atlassian__createConfluenceContent, mcp__plugin_base_atlassian__updateConfluenceContent, mcp__plugin_base_atlassian__createConfluenceSpace, mcp__plugin_base_atlassian__setConfluenceSpaceInstructions, mcp__plugin_base_atlassian__copyConfluenceContent, mcp__plugin_base_atlassian__moveConfluenceContent, mcp__plugin_base_atlassian__archiveConfluenceContent, mcp__plugin_base_atlassian__unarchiveConfluenceContent, mcp__plugin_base_atlassian__restoreConfluenceContentVersion, mcp__plugin_base_atlassian__convertConfluenceContentMode, mcp__plugin_base_atlassian__setConfluenceContentStatus, mcp__plugin_base_atlassian__createConfluenceComment, mcp__plugin_base_atlassian__updateConfluenceComment, mcp__plugin_base_atlassian__updateConfluenceCommentResolution, mcp__plugin_base_atlassian__addConfluenceContentSuggestions, mcp__plugin_base_atlassian__createConfluenceAttachment, mcp__plugin_base_atlassian__addLabelsToConfluenceContent, mcp__plugin_base_atlassian__addConfluenceReaction, mcp__plugin_base_atlassian__addConfluenceContentPermissions, mcp__plugin_base_atlassian__removeConfluenceContentPermissions, mcp__plugin_base_atlassian__replaceConfluenceContentPermissions, mcp__plugin_base_atlassian__setConfluenceContentRestrictionState, mcp__plugin_base_atlassian__enableConfluencePublicLink, mcp__plugin_base_atlassian__disableConfluencePublicLink, mcp__plugin_base_atlassian__completeConfluenceTask, mcp__plugin_base_atlassian__reopenConfluenceTask, mcp__plugin_base_atlassian__starConfluenceContent, mcp__plugin_base_atlassian__unstarConfluenceContent, mcp__plugin_base_atlassian__starConfluenceSpace, mcp__plugin_base_atlassian__unstarConfluenceSpace, mcp__plugin_base_atlassian__watchConfluenceContent, mcp__plugin_base_atlassian__unwatchConfluenceContent, mcp__plugin_base_atlassian__watchConfluenceSpace, mcp__plugin_base_atlassian__unwatchConfluenceSpace, mcp__plugin_base_atlassian__watchConfluenceLabel, mcp__plugin_base_atlassian__unwatchConfluenceLabel, mcp__plugin_base_atlassian__createConfluenceInfographicForPage, mcp__plugin_base_atlassian__editConfluenceInfographicForPage, mcp__plugin_base_atlassian__createConfluenceMauiApp, mcp__plugin_base_atlassian__editConfluenceMauiApp, mcp__plugin_base_atlassian__createBitbucketRepoPullRequest, mcp__plugin_base_atlassian__updateBitbucketRepoPullRequest, mcp__plugin_base_atlassian__mergeBitbucketRepoPullRequest, mcp__plugin_base_atlassian__approveBitbucketRepoPullRequest, mcp__plugin_base_atlassian__requestChangesOnBitbucketRepoPullRequest, mcp__plugin_base_atlassian__addBitbucketRepoPullRequestComment, mcp__plugin_base_atlassian__resolveBitbucketRepoPullRequestComment, mcp__plugin_base_atlassian__reopenBitbucketRepoPullRequestComment, mcp__plugin_base_atlassian__createBitbucketRepoPullRequestTask, mcp__plugin_base_atlassian__setBitbucketRepoPullRequestTaskState, mcp__plugin_base_atlassian__createBitbucketRepoBranch, mcp__plugin_base_atlassian__createBitbucketRepoCommit, mcp__plugin_base_atlassian__runBitbucketRepoPipeline, mcp__plugin_base_atlassian__addTeamworkGraphContext, mcp__plugin_base_atlassian__addLoomInteraction, mcp__plugin_base_atlassian__updateLoomObjectMetadata, mcp__plugin_base_atlassian__updateLoomObjectVisibility, mcp__plugin_base_atlassian__shareLoomObject, mcp__plugin_base_atlassian__createLoomObjectUpload, mcp__plugin_base_atlassian__publishLoomObject, mcp__plugin_base_atlassian__createLoomObjectFolder, mcp__plugin_base_atlassian__moveLoomObjectToFolder, mcp__plugin_base_atlassian__recoverLoomVideo, mcp__plugin_base_atlassian__createGoal, mcp__plugin_base_atlassian__createGoalUpdate, mcp__plugin_base_atlassian__addConnectionsToGoals, mcp__plugin_base_atlassian__createProject, mcp__plugin_base_atlassian__createProjectUpdate, mcp__plugin_base_atlassian__addConnectionsToProjects, mcp__plugin_base_atlassian__createTeam, mcp__plugin_base_atlassian__updateTeam, mcp__plugin_base_atlassian__createFocusArea, mcp__plugin_base_atlassian__updateFocusArea, mcp__plugin_base_atlassian__createFocusAreaStatusUpdate, mcp__plugin_base_atlassian__linkToFocusArea, mcp__plugin_base_atlassian__createTalentSkill, mcp__plugin_base_atlassian__updateTalentWorkerSkillMappings, mcp__plugin_base_atlassian__updateTalentPositionFocusAreaMappings, mcp__plugin_base_atlassian__updateCapacityPlanAllocation, mcp__plugin_base_atlassian__updateCapacityPlanAllocations, mcp__plugin_base_atlassian__createCapacityPlanNonProjectWork, mcp__plugin_base_atlassian__updateCapacityPlanNonProjectWork, mcp__plugin_base_atlassian__createJiraAlignItem, mcp__plugin_base_atlassian__updateJiraAlignItem, mcp__plugin_base_atlassian__executeWrite, mcp__plugin_base_atlassian__executeDestructive
@@ -47,38 +47,41 @@ one refusal.
 
 Use the Atlassian MCP. Field IDs: read
 `${CLAUDE_PLUGIN_ROOT}/references/jira-field-ids.md` (tiny — the verified custom-field
-IDs and the exact request shape, incl. `expand: "names"`) and request that shape with
-`responseContentFormat: "markdown"`. Decision rule: an ID **present in the `names` map** with a
-`null` value = the field is **genuinely empty** — report it empty, don't invent content, don't
-rediscover; an ID **absent from the `names` map** = wrong/renamed ID — read
-`${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Step B, rediscover, use the
-resolved ID, and set `field_id_mismatch` in your output. **plugin root** = the plugin's own
+IDs, the exact request shape and v2's response shape) and request that shape with
+`responseContentFormat: "markdown"`. The custom fields come back under `fields.customFields`, each
+keyed by its field **name** as `{ "id": "<id>", "value": … }`. Decision rule: an entry keyed by
+its name with no `value` = the field is **genuinely empty** — report it empty, don't invent
+content, don't rediscover; an entry keyed by the **raw id** itself (no name resolved) =
+wrong/renamed ID — read `${CLAUDE_PLUGIN_ROOT}/references/jira-custom-fields.md` → Step B,
+rediscover, use the resolved ID, and set `field_id_mismatch` in your output. **plugin root** = the plugin's own
 directory, the one holding `references/` and `scripts/`; the commands in these instructions
 already carry its absolute path — copy that path into the shell, no shell variable carries it.
 
-- **Rich-text fields arrive as markdown.** slim compresses every MCP result over 4 KB, and its
-  json engine turns every ADF document in it — the rich-text **custom** fields (AC, Assumptions,
-  Technical Approach, Steps to test, Documentation Links) included — into clean markdown, with
-  inline-mark links and smart links (`inlineCard` / `blockCard` / `embedCard`) kept as `<url>`.
-  A small response (4 KB or less) comes back untouched: a custom field there is still raw ADF,
-  and small — read its text and link nodes directly. No converter runs on the read side.
+- **Rich-text fields arrive as markdown.** The description and every rich-text **custom** field
+  (AC, Assumptions, Technical Approach, Steps to test, Documentation Links) come back from
+  `getJiraIssue` as markdown strings, an inline image included (`![](blob:https://media…&id=<media
+  id>&…)` — the media id only). Should a response ever say `appliedContentFormat: "html"`, compact
+  each HTML value to markdown yourself (Read the comments → HTML bodies; the same rules). Only a server still on
+  Atlassian's v1 returns raw ADF (a JSON object with `type: "doc"`): read its text and link nodes
+  directly. No converter script runs on the read side.
 - **Compressed result.** A compressed result ends with a stats line and a
   `<<full=<path> original_result>>` handle naming the untouched original; rows slim moved out of
   the JSON sit behind a `<<full=<path> N_rows_offloaded>>` handle inside it, and a long string in
   a kept row may be cut to its first 300 characters plus `… [+N chars]`. All of it is part of the
   ticket: a field or a comment you need that is not in the compact text, or is cut there, is in
   those files. The original is the MCP result as delivered — a content-block array whose `text` is
-  the issue JSON, on one line — so `mcp__slim__view` with `jq` misses on it and a `Read` of it
-  truncates; read it with the Bash `jq` line in Read the comments, which unwraps it.
+  the tool's JSON (`{"data":{…}}`), on one line — so `mcp__slim__view` with `jq` misses on it and a
+  `Read` of it truncates; read it with the Bash `jq` line in Read the comments, which unwraps it.
 - **Stubbed result (big ticket).** A result slim could not bring under its cap — or the host's own
   "exceeds maximum allowed tokens" overflow, which slim takes too — arrives as a `<<slim stub>>`
   with a `full=<path>` line. Never `Read` that file whole (slim denies it). Narrow it:
-  `mcp__slim__view({ path: "<the full= path>", jq: ".fields.summary" })` — `jq` takes dot paths
-  (`.fields.summary`, `.a[0]`), `[]` iteration, `,` multi-select and `| keys` / `| length`, and
+  `mcp__slim__view({ path: "<the full= path>", jq: ".data.fields.summary" })` — `jq` takes dot paths
+  (`.data.fields.summary`, `.a[0]`), `[]` iteration, `,` multi-select and `| keys` / `| length`, and
   refuses anything else by name; a path that resolves nothing says what was there — or `Read` it
   windowed (`offset` / `limit`).
 - Extract **every external URL** found in the fields you requested (description, AC, TA,
-  Documentation Links) — links pasted on their own line survive as `<url>`, so don't lose them.
+  Documentation Links) — a link comes back as `[text](url)`, `<url>`, a bare URL, or in HTML as
+  `<a href="url">`; don't lose any of them.
   Sort them into: `figma_urls` (figma.com), `notion_urls` (notion.so / *.notion.site), and
   `other_links` (everything else worth reading — Confluence, Google docs, 3rd-party docs).
   The caller reads them (`reading-linked-docs.md`); you only collect them. Links found in
@@ -89,33 +92,44 @@ already carry its absolute path — copy that path into the shell, no shell vari
 Most of what a ticket decides after it was written lives in its comments — QA verdicts,
 clarifications, reopen reasons — so they are read on **every** run.
 
-The `comment` field of your main response holds them: `comments[]` (each with `author`,
-`created`, `updated` and a markdown `body` — `responseContentFormat: "markdown"` does that to the
-standard `comment` field), plus `total` and `maxResults`. Every comment counts, and in full. In a
-compressed result slim may have cut a long body to its first 300 characters plus `… [+N chars]`,
-or moved whole comment rows behind a `N_rows_offloaded` handle. Before you write anything, restore
-both from the untouched original (`<original-file>` = the `<<full=<path> original_result>>` path,
-or a stub's `full=` path — the line reads either):
+`getJiraIssue` returns no comment bodies on v2 — read them with **`listJiraIssueComments`**
+(`cloudId`, `issueIdOrKey`, `orderBy: "created"` (oldest first), `maxResults: 100`,
+`responseContentFormat: "markdown"`). Page with `startAt` until `isLast` is true; `total` is the
+full count. Each comment carries `id`, `author.displayName`, `created`, `updated`, `body`. Every
+comment counts, and in full. In a compressed result slim may have cut a long body to its first 300
+characters plus `… [+N chars]`, or moved whole comment rows behind a `N_rows_offloaded` handle.
+Before you write anything, restore both from the untouched original (`<original-file>` = the
+`<<full=<path> original_result>>` path, or a stub's `full=` path — the line reads either):
 
 ```bash
-jq -r '(if type=="array" then .[0].text|fromjson elif .content then .content[0].text|fromjson else . end) | .fields.comment.comments[] | select(.id=="<comment id>") | .body' <original-file>
+jq -r '(if type=="array" then .[0].text|fromjson elif .content then .content[0].text|fromjson else . end) | (.data // .) | .comments[] | select(.id=="<comment id>") | .body' <original-file>
 ```
 
 — one run per cut comment; for offloaded rows, a windowed `Read` of the rows file (it holds them
-untrimmed), or the same line run with `-c` and ending in `.fields.comment.comments[<from>:<to>]`
+untrimmed), or the same line run with `-c` and ending in `.comments[<from>:<to>]`
 for a slice (keep slices small: Bash shows about 30,000 characters inline). A body that still ends in `… [+N chars]` never goes into `comments.md`.
+
+**HTML bodies.** When any comment on a page holds a node markdown cannot carry (an @mention, an
+image, a panel, a status), the server returns that **whole page** as HTML — `appliedContentFormat:
+"html"` and a `warning` say so; the same comment read alone would be markdown. That is the normal
+shape of a QA thread, not an error. Compact each HTML body to markdown before anything else reads
+it: `<p>`, `<br>` and block ends → line breaks; `<h1>`…`<h6>` → `#` headings; `<li>` → `- ` (one
+indent per nested list; numbered for `<ol>`); `<strong>`/`<b>` → `**…**`, `<em>`/`<i>` → `*…*`,
+`<code>` → `` `…` ``; `<a href="u">t</a>` → `[t](u)` (just `u` when `t` is `u`); a
+`data-type="mention"` span → its `@Name` text; a media node (`data-type="media"`) → `[image: <its
+data-alt>]` (`[image]` with no `data-alt`); a panel or status → its text; `<table>` → a GFM table;
+any other tag is dropped and its text kept; entities (`&amp;`, `&quot;`, `&#039;`, …) decoded.
+Colour spans keep their text only.
 
 Compose the comments oldest first, one block per comment: `### <n>. <author> — <created>` (plus
 `(edited <updated>)` when `updated` differs) followed by the markdown body verbatim except for
-the conversion's markup: a `<custom data-type="mention" …>@Name</custom>` tag becomes its `@Name`
-text, any other `<custom …>…</custom>` tag (emoji, smartlink) its inner text, and an inline image
-`![](blob:https://media…)` becomes `[image]` — the blob URL names no attachment filename and is
-useless outside Jira. So which screenshot goes with which comment is not known here: the
-attachment rows carry their own `author` and `created`, and the caller lines them up. Read the
-comments from `fields.comment.comments`; the response's top-level `comments` array duplicates them. When `total` is larger
-than the number of comments returned, Jira paged the field: add a last line
-`comments: <shown>/<total>` and carry it as the last entry of `comments` so the caller knows what
-it is not seeing; there is no second-page tool. No comments → `comments: []`.
+the markup compaction: the HTML rules above, and in a markdown body a
+`<custom data-type="mention" …>@Name</custom>` tag becomes its `@Name` text, any other
+`<custom …>…</custom>` tag (emoji, smartlink) its inner text, and an inline image
+`![](blob:https://media…)` becomes `[image]` — a markdown blob URL carries only the media id, no
+file name, and is useless outside Jira. When the pages you read hold fewer comments than `total`, add a
+last line `comments: <shown>/<total>` and carry it as the last entry of `comments` so the caller
+knows what it is not seeing. No comments → `comments: []`.
 
 Each `comments` line you return quotes the comment's **first 160 characters VERBATIM** —
 copied (after the same markup compaction), never paraphrased or summarized. A live run that retold them in its own words also
@@ -151,10 +165,12 @@ a linked screenshot is a URL in the requested fields or the comments whose host 
 3. Else `Read` `${CLAUDE_PLUGIN_ROOT}/references/jira-reader-attachments.md` and follow it: the
    two scripts, the resize through slim, the degradation. A ticket read never fails on a missing
    screenshot.
-4. **No join to comments.** Never attribute a native attachment to a comment or to the
-   description — Jira creates it when the image is pasted, which can be minutes before the comment
-   is saved, so author and time prove nothing. List the rows with their `author` and `created`;
-   the caller lines them up.
+4. **No join by time.** Never attribute a native attachment to a comment or to the description by
+   its `author` or `created` — Jira creates it when the image is pasted, which can be minutes
+   before the comment is saved, so author and time prove nothing. The one join is a name: an HTML
+   comment's image keeps its file name (`[image: <data-alt>]`, Read the comments), and that is the
+   attachment row's `filename`; a markdown body's `[image]` names nothing. List the rows with their
+   `author` and `created`; the caller lines them up.
 
 ## Save the ticket and comments files
 
