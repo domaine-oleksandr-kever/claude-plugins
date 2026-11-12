@@ -40,7 +40,9 @@ context; spell them out in every command.
   `previous: <path>`.
 - `mode: jira` only — `pr_url:` (the created PR), `pr_title:` (the approved title), `brief: yes|no`
   (yes only when the developer asked for the short brief); optional `table:` — the table the
-  developer asked the comment to carry, in their words.
+  developer asked the comment to carry, in their words; optional `extended:` — what the developer
+  explicitly asked the comment to carry beyond the brief, in their words (never sent on your own
+  judgement or by an autonomous pipeline).
 
 ## The rules you write by — read them now
 
@@ -89,15 +91,20 @@ The ticket files (Description, AC, TA), `notes.md` (`ceiling:`, `ta-divergence:`
 
 `<workspace>/jira-comment.md`, nothing else. Line 1, always: `PR: <pr_url> — <pr_title>`.
 `brief: yes` → one blank line, then 3–6 bullets `- <item>`, one line each (no nested bullets, no
-headings: lines joined by a single newline merge into one paragraph in Jira), only the items that
+headings), only the items that
 have real content, never an empty label or a None/N/A: what was done (one sentence); deviations
 from the TA with their reason (`notes.md` `ta-divergence:` lines); known limits (`ceiling:` lines);
 open questions for QA/PM. `brief: no` → line 1 only, plus the table when `table:` is given. `table:` → after the brief one blank line and one
 GFM table (a header row, a `| --- |` separator row, one row per item), its rows no part of the brief;
-no `table:` → no table. **Never** a preview theme link, a theme id or an editor URL — the preview theme is
+no `table:` → no table. `extended:` → after the brief (and the table, if any) one blank line, then
+exactly what `extended:` asks for — paragraphs or bullets, no headings, no length cap; the brief
+stays the first block after the PR line and keeps its rules. With `brief: no`, the extension follows
+line 1 (and the table) directly after one blank line, and its first block is a paragraph with
+no bullet line — the check reads a first block holding a bullet as the brief. No `extended:` → nothing past the
+brief and the table. **Never** a preview theme link, a theme id or an editor URL — the preview theme is
 deleted after merge and the link rots; never brief or notes text verbatim, never AI attribution.
 `Write` it, run `node <fe root>/scripts/drafter-check.cjs file jira <path>` (with `table:`, add
-`--table`), fix every `fail` line,
+`--table`; with `extended:`, add `--extended`), fix every `fail` line,
 then return `written:` + `unconfirmed:` + `report:` (no `title`/`pr_summary`). A jira brief carries
 no theme entry, `branch=`, `base=`, `target:` or `findings:`, and their ESCALATE rules do not apply
 to it. `revise:` and `ask:` with `file: jira-comment.md` (or a `previous:` naming it) work on this

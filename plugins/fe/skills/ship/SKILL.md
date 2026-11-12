@@ -94,8 +94,7 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
 4. **Permissions.** List the side-effect commands this run will execute — `git commit`,
    `git push`, `gh pr create`, `gh pr checks` (the `--watch` loop), `gh api` (aftercare
    thread polling **and** the `graphql` `resolveReviewThread` mutation), `gh pr ready`
-   (the draft end-state flip), `<fe root>/scripts/*.sh`,
-   `node "<base root>/scripts/md-to-adf.cjs"`, plus the policy-gated Atlassian
+   (the draft end-state flip), `<fe root>/scripts/*.sh`, plus the policy-gated Atlassian
    MCP writes (`editJiraIssue`, `addOrEditJiraIssueComment`) — and confirm with the developer
    that they're pre-approved (allowlisted in `settings.json`, or acceptEdits on — offer those
    entries or `/fewer-permission-prompts` if not). A permission prompt mid-run kills autonomy — fix

@@ -66,8 +66,8 @@ sentences where they read cleaner (e.g. "PDP only — cart/checkout → ELC-303.
    live in Jira, not here, and never merge / deploy / release instructions: those are the
    developer's to run. Net-new apps / app embeds / scripts go under **Dependencies** — never
    the Shopify platform, CDN, theme editor, or already-installed apps (net-new prerequisites only).
-7. **Jira parity:** the markdown file is the review source of truth; converted to ADF with
-   `<base root>/scripts/md-to-adf.cjs` it must paste in as the same seven H4 sections.
+7. **Jira parity:** the markdown file is the review source of truth; written verbatim as markdown
+   (`<base root>/references/jira-write.md`) it must read back as the same seven H4 sections.
 8. **Client confidentiality:** this repo is client-facing — never reference tickets, projects, repos,
    or Figma files from other client accounts.
 

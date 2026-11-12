@@ -6674,6 +6674,39 @@ dc DC44f-jira-table-row-rots 1 'fail theme id' file jira "$DCD/jira-table-rot.md
 dc DC44g-usage-stt-table 2 'usage:' file stt "$DCD/stt.md" --table
 printf 'PR: https://github.com/o/r/pull/12 — t\n- Adds the section.\ntable: the changed icons\n' > "$DCD/jira-briefkey-table.md"
 dc DC44h-jira-brief-table-key 1 'fail brief text in the comment' file jira "$DCD/jira-briefkey-table.md" --table
+# DC44i–DC44u: --extended (the developer asked for more than the brief) — the first block after the PR
+# line is the brief, the rest is exempt from the count and the bullet check, never from rot/heading/attribution
+{ cat "$DCD/jira-brief.md"; printf '\nThe scent notes come from the product metaobject, in the order set in the admin.\n'; for n in 1 2 3 4 5 6 7 8; do printf 'Detail line %s about the change.\n' "$n"; done; } > "$DCD/jira-ext.md"
+dc DC44i-jira-extended-ok 0 'brief_lines=3' file jira "$DCD/jira-ext.md" --extended
+grep -qx 'extended_lines=9' "$DCD/out" && ok || bad DC44i-extended-count "$(tr '\n' ';' < "$DCD/out")"
+dc DC44j-jira-extension-without-flag 1 'fail brief longer than 6 lines' file jira "$DCD/jira-ext.md"
+grep -qx 'extended_lines=0' "$DCD/out" && ok || bad DC44j-extended-zero "$(tr '\n' ';' < "$DCD/out")"
+{ cat "$DCD/jira-brief.md"; printf '\n## Details\nThe notes keep their admin order.\n'; } > "$DCD/jira-ext-heading.md"
+dc DC44k-jira-extension-heading 1 'fail heading in the comment' file jira "$DCD/jira-ext-heading.md" --extended
+{ cat "$DCD/jira-brief.md"; printf '\nPreview: https://s.myshopify.com/products/x?preview_theme_id=123456789012\n'; } > "$DCD/jira-ext-rot.md"
+dc DC44l-jira-extension-rots 1 'fail preview theme link' file jira "$DCD/jira-ext-rot.md" --extended
+{ cat "$DCD/jira-brief.md"; printf '\nCo-Authored-By: Claude <noreply@anthropic.com>\n'; } > "$DCD/jira-ext-attr.md"
+dc DC44m-jira-extension-attribution 1 'fail AI attribution' file jira "$DCD/jira-ext-attr.md" --extended
+{ cat "$DCD/jira-brief.md"; printf '\nKnown limits: N/A\n'; } > "$DCD/jira-ext-na.md"
+dc DC44n-jira-extension-none 1 'fail None/N/A placeholder' file jira "$DCD/jira-ext-na.md" --extended
+printf 'PR: https://github.com/o/r/pull/12 — t\n\n- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n- 7\n\nMore detail.\n' > "$DCD/jira-ext-long.md"
+dc DC44o-jira-extended-brief-too-long 1 'fail brief longer than 6 lines' file jira "$DCD/jira-ext-long.md" --extended
+{ cat "$DCD/jira-brief.md"; printf '\n| Icon | Change |\n| --- | --- |\n| a | b |\n'; } > "$DCD/jira-ext-table.md"
+dc DC44p-jira-extension-table-no-flag 1 'fail table in the comment' file jira "$DCD/jira-ext-table.md" --extended
+dc DC44q-jira-extension-table-flag-ok 0 'extended_lines=0' file jira "$DCD/jira-ext-table.md" --extended --table
+# DC44r: brief: no + extended: — a first block with no bullet is no brief, it opens the extension
+printf 'PR: https://github.com/o/r/pull/12 — t\n\nThe scent notes come from the product metaobject.\n\n- a\n- b\n' > "$DCD/jira-ext-plain.md"
+dc DC44r-jira-extended-no-brief-ok 0 'brief_lines=0' file jira "$DCD/jira-ext-plain.md" --extended
+grep -qx 'extended_lines=3' "$DCD/out" && ok || bad DC44r-extended-count "$(tr '\n' ';' < "$DCD/out")"
+dc DC44r2-jira-no-brief-prose-without-flag 1 'fail brief line is not a bullet' file jira "$DCD/jira-ext-plain.md"
+# DC44r3: a first block that mixes a bullet with prose is still the brief and fails its bullet check
+printf 'PR: https://github.com/o/r/pull/12 — t\n\n- Adds the section.\nPlain prose in the brief.\n\nMore detail.\n' > "$DCD/jira-ext-mixed.md"
+dc DC44r3-jira-extended-mixed-brief 1 'fail brief line is not a bullet' file jira "$DCD/jira-ext-mixed.md" --extended
+dc DC44s-jira-extended-pr-line-only 0 'extended_lines=0' file jira "$DCD/jira.md" --extended
+{ cat "$DCD/jira-brief.md"; printf '\nextended: the developer wants the metaobject explained\n'; } > "$DCD/jira-ext-key.md"
+dc DC44s2-jira-extension-brief-key 1 'fail brief text in the comment' file jira "$DCD/jira-ext-key.md" --extended
+dc DC44t-usage-stt-extended 2 'usage:' file stt "$DCD/stt.md" --extended
+dc DC44u-usage-pr-extended 2 'usage:' file pr "$DCD/stt.md" --extended
 dc DC45-receipt-jira-good 0 'kind=written' receipt jira <<'TXT'
 written: /w/.claude/tasks/ELC-1/jira-comment.md
 unconfirmed: []

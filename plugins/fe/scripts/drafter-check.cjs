@@ -27,9 +27,12 @@
 //                                                (off with --no-preview when the notes.md beside it
 //                                                records 'preview-decision: no preview'), None/N/A,
 //                                                Summary, attribution
-//   drafter-check.cjs file jira <path> [--table]  jira-comment.md: PR line, bulleted brief, no preview link,
-//                                                attribution; a GFM table fails, except with --table (the
-//                                                developer asked for one): then its rows are no brief lines
+//   drafter-check.cjs file jira <path> [--table] [--extended]  jira-comment.md: PR line, bulleted brief,
+//                                                no preview link, attribution; a GFM table fails, except with
+//                                                --table (the developer asked for one): then its rows are no
+//                                                brief lines; --extended (the developer asked for more than the
+//                                                brief): only the first block after the PR line is the brief,
+//                                                and none when that block has no bullet
 //   drafter-check.cjs receipt stt|pr|jira        the drafter's reply on stdin: one kind, no empty field;
 //                                                stt: `ac: empty` and a non-empty `ac_proposal:` come together;
 //                                                `page_links: none — <why>` and `pages_needed:` never together
@@ -44,7 +47,7 @@ const USAGE = `usage: drafter-check.cjs file stt <path> [--refs <dir>] [--projec
        drafter-check.cjs rules <file> [--prose]
        drafter-check.cjs rules-path [--cwd <dir>]
        drafter-check.cjs file pr <path> [--no-preview]   (--theme: accepted, no-op)
-       drafter-check.cjs file jira <path> [--table]
+       drafter-check.cjs file jira <path> [--table] [--extended]
        drafter-check.cjs receipt stt|pr|jira   (the drafter's reply on stdin)
 The pr check requires the Theme preview table; --no-preview turns that off only when the notes.md
 beside the checked file holds a 'preview-decision: no preview' line (the developer's recorded
@@ -70,9 +73,15 @@ path=<abs>' when git tracks it; 'excluded=.claude/domaine/steps-to-test.md exclu
 untracked and not ignored, that line went into the repo's local info/exclude and git now ignores it;
 'warn=rules_not_ignored reason=check_ignore_failed|exclude_unwritable|gitignore_reincludes path=<abs>'
 when it is untracked and still not ignored. Exit 0 whatever it finds.
-The jira check fails a GFM table (a pipe row over a --- separator row, as base md-to-adf.cjs reads
-one); --table, only when the developer asked for a table in the comment, takes its rows out of the
-brief's line count and bullet check. Prints tables=<n>.
+The jira check fails a GFM table (a pipe row over a --- separator row); --table, only when the
+developer asked for a table in the comment, takes its rows out of the brief's line count and bullet
+check. Prints tables=<n>. --extended, only when the developer asked for more than the brief: the
+brief is the first block of non-blank lines after the PR line (still at most 6 lines, all bullets,
+no bare label) — a first block with no bullet line is no brief (brief_lines=0) and opens the
+extension; every line after the brief is the extension, exempt from the line count, the
+bullet check and the label check; the heading, None/N/A, rot, brief-text and attribution checks
+still read every line, and a table anywhere still needs --table. Prints extended_lines=<n> (0
+without --extended).
 Prints result=ok|fail, counts and one 'fail <check>' line per defect — never the checked text.
 Exit 0 ok, 1 fail, 2 usage.`;
 
@@ -492,8 +501,8 @@ const ROT = [
   ['editor URL', /\/themes\/\d+\/editor|\/admin\/themes\/\d+|admin\.shopify\.com\/store\/[^/\s]+\/themes\/\d+/i],
   ['theme id', /\btheme[ _-]?id\b|\btheme\s*#?\d{6,}|\b\d{11,14}\b/i],
 ];
-// a GFM table as base scripts/md-to-adf.cjs reads one: a row with an unescaped pipe over a separator
-// row, then every following non-blank row with a pipe; a line that only holds a pipe is no table
+// a GFM table: a row with an unescaped pipe over a separator row, then every following non-blank row
+// with a pipe; a line that only holds a pipe is no table
 const PIPE = /(?<!\\)\|/;
 const TABLE_SEP = /^[ \t]*\|?[ \t:]*-{1,}[-\t :|]*$/;
 /** The indexes of `raw`'s table rows and the number of tables. */
@@ -508,21 +517,35 @@ function tableRows(raw) {
   }
   return { rows, n };
 }
-const BRIEF_KEY = /^\s*(?:workspace|mode|answers|ticket|target|findings|related|screenshot_dir|previous|feedback|question|pr_url|pr_title|brief|table):\s|^\s*(?:branch|base)=/;
+const BULLET = /^\s*[-*]\s+\S/;
+const BRIEF_KEY = /^\s*(?:workspace|mode|answers|ticket|target|findings|related|screenshot_dir|previous|feedback|question|pr_url|pr_title|brief|table|extended):\s|^\s*(?:branch|base)=/;
 
-/** Jira PR-link comment: the PR line first, brief lines ≤ 6, no bare label, no None/N/A, nothing that rots, no brief text, attribution; a table only with `table` (the developer's request), its rows outside the brief. */
-function checkJira(path, table) {
+/** Jira PR-link comment: the PR line first, brief lines ≤ 6, no bare label, no None/N/A, nothing that rots, no brief text, attribution; a table only with `table` (the developer's request), its rows outside the brief; with `extended`, only the first block after the PR line is the brief, and a first block with no bullet is none. */
+function checkJira(path, table, extended) {
   const fails = [];
   const text = readFile(path, fails);
   if (text === null) return report(['kind=jira'], fails);
   const raw = text.split('\n');
   const tables = tableRows(raw);
-  if (tables.n && !table) fails.push("table in the comment (only on the developer's request: --table, and base:jira-writer with tables: keep)");
+  if (tables.n && !table) fails.push("table in the comment (only on the developer's request: --table)");
   const lines = raw.filter((l) => l.trim());
   if (!PR_LINE.test(lines[0] || '')) fails.push("line 1 is not 'PR: <url> — <title>'");
-  const brief = raw.filter((l, i) => l.trim() && !tables.rows.has(i)).slice(1);
+  let body = raw.map((l, i) => i).filter((i) => raw[i].trim() && !tables.rows.has(i)).slice(1);
+  let extension = [];
+  if (extended) {
+    // the brief block: from the first non-blank line after the PR line up to the next blank line
+    let i = raw.findIndex((l) => l.trim()) + 1;
+    while (i > 0 && i < raw.length && !raw[i].trim()) i++;
+    let end = i;
+    while (end > 0 && end < raw.length && raw[end].trim()) end++;
+    // a first block with no bullet is no brief (`brief: no`): it opens the extension
+    if (!body.some((k) => k < end && BULLET.test(raw[k]))) end = i;
+    extension = body.filter((k) => k >= end);
+    body = body.filter((k) => k < end);
+  }
+  const brief = body.map((i) => raw[i]);
   if (brief.length > 6) fails.push('brief longer than 6 lines');
-  if (brief.some((l) => !/^\s*[-*]\s+\S/.test(l))) fails.push('brief line is not a bullet');
+  if (brief.some((l) => !BULLET.test(l))) fails.push('brief line is not a bullet');
   if (lines.some((l) => /^#{1,6} /.test(l))) fails.push('heading in the comment');
   // a bullet that is one bold span of four or more words not ending in a colon, or ending in a CJK
   // stop, is a sentence — content, never a label (a label is 1–3 words: `**Note:**`, `**Desktop**`)
@@ -536,7 +559,7 @@ function checkJira(path, table) {
   if (lines.some((l) => BRIEF_KEY.test(l))) fails.push('brief text in the comment');
   const hits = attributionHits(text);
   if (hits) fails.push('AI attribution');
-  return report(['kind=jira', `brief_lines=${brief.length}`, `tables=${tables.n}`, `attribution_hits=${hits}`], fails);
+  return report(['kind=jira', `brief_lines=${brief.length}`, `tables=${tables.n}`, `extended_lines=${extension.length}`, `attribution_hits=${hits}`], fails);
 }
 
 // `[a, b, "c, d"]` → its entries, commas inside quotes kept
@@ -666,9 +689,9 @@ function main(argv) {
     }
     const noPageLink = rest.includes('--no-page-link');
     const unknown = rest.filter((a) => !(kind === 'pr' && (a === '--theme' || a === '--no-preview')) && !(rules && a === '--no-page-link')
-      && !(kind === 'jira' && a === '--table'));
+      && !(kind === 'jira' && (a === '--table' || a === '--extended')));
     if (unknown.length) { process.stderr.write(USAGE + '\n'); return 2; }
-    if (kind === 'jira') return checkJira(path, rest.includes('--table'));
+    if (kind === 'jira') return checkJira(path, rest.includes('--table'), rest.includes('--extended'));
     return kind === 'stt' ? checkStt(path, refs, rules, noPageLink) : checkPr(path, noPreviewState(path, rest.includes('--no-preview')));
   }
   if (cmd === 'receipt' && path === undefined) {

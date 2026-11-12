@@ -162,9 +162,10 @@ its brief says otherwise.
    hand after item 4 with a one-line caption (the plugin uploads nothing; result screenshots stay in
    the PR); never a line addressed to the developer inside the field.
    Save `steps-to-test.md` and run `node <fe root>/scripts/drafter-check.cjs file stt <path>` until
-   it prints `result=ok`; policy allows → write the field via
-   `node "<base root>/scripts/md-to-adf.cjs" --no-tables` + `editJiraIssue` on the
-   workspace `ticket.md` key (`<base root>/references/jira-adf-write.md`).
+   it prints `result=ok`; policy allows → write the field **inline** (this phase is a subagent and
+   cannot spawn `base:jira-writer`) per `<base root>/references/jira-write.md` → The mechanics: the
+   file verbatim as the markdown value of the Steps-to-test field on the workspace `ticket.md` key,
+   an empty source refused before any call, no retry in another shape, then its Read-back check.
 6. **aftercare** — `gh pr checks --watch`; a failing check → diagnose → fix agent → refresh
    the session theme's code (`<fe root>/scripts/create-preview-theme.sh refresh --theme
    <the session-theme id from notes.md — under session-theme.md's provenance gate>`, plus
@@ -226,5 +227,6 @@ its brief says otherwise.
    `file jira`, never read it. Policy allows (`PR link` or `hand-off comment` yes) → spawn
    `base:jira-writer` (ticket — from the workspace `.claude/tasks/<work-id>/`, whose
    `ticket.md` the writer checks the key against · `comment` · that file) for the one
-   `addOrEditJiraIssueComment` write (`<base root>/references/jira-adf-write.md`);
+   `addOrEditJiraIssueComment` write (`<base root>/references/jira-write.md`; never `extended:` —
+   an autonomous run has no developer request for more than the brief);
    policy forbids → report the `PR: <url> — <title>` line and the file's path for manual paste.

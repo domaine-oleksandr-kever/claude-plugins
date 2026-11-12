@@ -38,7 +38,7 @@ and stop.
   is the default; add `--no-preview` only when `notes.md` holds the developer's recorded
   `preview-decision: no preview` line — the script itself checks it; stt with `project_rules:`: add
   `--project-rules <path>`, and `--no-page-link` only when the receipt carries `page_links: none — <why>`;
-  jira with a `table:` in the brief: add `--table`;
+  jira with a `table:` in the brief: add `--table`; with an `extended:` in the brief: add `--extended`;
   a receipt with `pages_needed:` gets the skill's pages step before this check); `fail` lines → SendMessage
   `revise:` + those lines; ok → the checkpoint. On the pr drafter's jira turn every `revise:` and
   `ask:` also carries `file: jira-comment.md` (that agent wrote `pr-body.md` too).
