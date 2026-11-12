@@ -18,7 +18,7 @@ pm builds on base and requires it. base supplies the Jira and doc readers, the J
 workspace and the shared MCP servers: Atlassian, Notion, Shopify Dev
 ([plugins/base/README.md](../base/README.md)). base requires slim, so pm runs with slim too.
 
-Current release: **pm v0.3.3**.
+Current release: **pm v0.3.4**.
 
 ## Status
 
@@ -79,7 +79,7 @@ The skills cite pm's own files by their path under pm's root (`<pm root>/…`, f
 | `skills/estimator-review/references/baseline-comparison.md` | `/pm:estimator-review` | when and how to compare against a Drive baseline estimator |
 | `skills/solutions-engineering/references/handoff-template.md` | `/pm:solutions-engineering` | the merchant handoff document |
 | `<base root>/references/task-workspace.md` (base's) | `/pm:project-estimator`, `/pm:merchant-brief`, `/pm:solutions-engineering` | the task workspace a ticket's work is saved to |
-| `<base root>/references/jira-adf-write.md` (base's) | `/pm:merchant-brief` | how an approved ticket description is converted to ADF before it reaches Jira |
+| `<base root>/references/jira-write.md` (base's) | `/pm:merchant-brief` | how an approved ticket description is written to Jira as markdown, verbatim |
 
 ## Conventions
 
