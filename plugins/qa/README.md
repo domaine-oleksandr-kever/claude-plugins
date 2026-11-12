@@ -20,7 +20,7 @@ store registry (`<base root>/scripts/qa-stores.cjs`), the shared references and 
 MCP server ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with slim
 too.
 
-Current release: **qa v0.6.0**.
+Current release: **qa v0.6.1**.
 
 ## Status
 
@@ -72,7 +72,7 @@ qa ships no reference of its own. The skill cites base's references by their pat
 | `references/task-workspace.md` | the `.claude/tasks/<KEY>/` workspace read first, and the progress close-out |
 | `references/steps-to-test-format.md` | cited, not read: `rows.md` maps its four items (and the older shapes) to setup and rows |
 | `references/break-it-qa.md` | the break-it rows, non-destructive only; `not-executable: access` for the rest |
-| `references/jira-adf-write.md` | cited, not read: `base:jira-writer` reads it for the opt-in Jira comment |
+| `references/jira-write.md` | cited, not read: `base:jira-writer` reads it for the opt-in Jira comment |
 
 ## Conventions
 

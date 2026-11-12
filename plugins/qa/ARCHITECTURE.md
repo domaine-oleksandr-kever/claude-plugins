@@ -20,7 +20,7 @@ plugins/qa/
 The skill hands off to base by qualified names only (`base:jira-reader`, `base:jira-writer`) and cites
 base's files as `<base root>/…`, the path on base's `base plugin root:` session line: the QA store
 registry (`scripts/qa-stores.cjs`), the task workspace, the Steps to Test format, the break-it method
-and the ADF write rules all live in base, so a second team plugin reads the same copy. qa names no
+and the Jira write rules all live in base, so a second team plugin reads the same copy. qa names no
 other team plugin's skill or path: the team plugins co-install and never require one another.
 
 ## 2. The skill's files
@@ -29,8 +29,8 @@ other team plugin's skill or path: the team plugins co-install and never require
 one pointer per phase. The detail is split by when it is needed, so a run loads each file once, at its
 phase, and a run that stops at Phase 1 never loads the last two: `gate.md` (Phases 1–3), `rows.md`
 (Phase 4), `brief.md` (Phases 5–6). Each rule is stated in one file only; another file points at it.
-base's `steps-to-test-format.md` and `jira-adf-write.md` are cited but not read by the skill —
-`rows.md` carries the item → row mapping, and `base:jira-writer` reads the ADF rules itself.
+base's `steps-to-test-format.md` and `jira-write.md` are cited but not read by the skill —
+`rows.md` carries the item → row mapping, and `base:jira-writer` reads the write rules itself.
 
 The rename to `QA preflight <KEY>` is a fallback: base's title hook names the session only after a
 ticket it can corroborate, once, so the skill renames when the tool exists and the title does not

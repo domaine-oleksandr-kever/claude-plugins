@@ -26,7 +26,7 @@ beside this one — read it when its phase starts:
 | `<qa root>/skills/preflight/brief.md` | Phase 5 | a filled brief, the Block 1 and Block 2 rules, the chat output, the Jira comment |
 
 Not for this skill to read: `<base root>/references/steps-to-test-format.md` (rows.md maps it) and
-`<base root>/references/jira-adf-write.md` (`base:jira-writer` reads it).
+`<base root>/references/jira-write.md` (`base:jira-writer` reads it).
 
 ## Global rules
 

@@ -23,8 +23,8 @@ by the agent at the viewports named.*
 * Tested in theme build: QA copy ACME US UAT (theme 123456789012)
 
 **Evidence on the criteria that pass verification:**
-1. {color:green}Pass{color} — Picked the shade "Ivory" on the product page: the swatch label reads "Ivory" and the price stays $42.00
-2. {color:green}Pass{color} — Added the product to the bag: the cart drawer opens with one line, "Ivory", quantity 1
+1. **Pass** — Picked the shade "Ivory" on the product page: the swatch label reads "Ivory" and the price stays $42.00
+2. **Pass** — Added the product to the bag: the cart drawer opens with one line, "Ivory", quantity 1
 
 ## Block 2 — Preflight notes (not for Jira)
 
@@ -60,14 +60,13 @@ by the agent at the viewports named.*
   carry the change, or no AC could be reached), **Partially pass** (some rows verified, the rest
   `needs data` / `for human eyes` / `not-executable`). A brief with no Block 1 (non-theme, nothing to
   test) has no Testing Status at all.
-- **Colour** — `{color:green}Pass{color}` / `{color:red}Fail{color}` on the status line and leading
-  every numbered row, so the verdicts scan as a column; Partially pass, Block and the label line stay
-  plain. `md-to-adf.cjs` turns the wiki form into Jira's colour; the file and the chat show it
-  literally.
+- **Row verdict** — a bold `**Pass**` / `**Fail**` leads every numbered row, so the verdicts scan as
+  a column; no text colour (`{color:…}` does not travel through Jira's markdown and would show
+  literally).
 - **Pass and Partially pass** list only green rows under `**Evidence on the criteria that pass
   verification:**`, each an observed fact — what was done, what the page did.
 - **Fail** lists every row that ran under `**Evidence:**`, passing rows as above, each defect
-  `{color:red}Fail{color} — <where> — expected <what the AC says>, actual <what the page did>`.
+  `**Fail** — <where> — expected <what the AC says>, actual <what the page did>`.
 - **Block** — the label line, a viewport bullet per pass that ran (none when no row ran, the desktop
   bullet alone when the run stopped after the desktop pass), the `Tested in theme build:` bullet, one
   reason line, nothing else: no evidence list. The reason line names what failed
