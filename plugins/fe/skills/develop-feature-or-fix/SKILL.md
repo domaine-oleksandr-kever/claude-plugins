@@ -79,6 +79,7 @@ don't redo Phase 1.
 
    Never `--pin-toml`: the theme is recorded, not pinned, because the pin is the session-theme offer's call. Read every run per `<fe root>/references/preview-theme-errors.md` → Reading a create/refresh result, and write its workspace lines at once: `session-theme:` on a create, `session-theme-pushed:` on every push. That line is what `/fe:qa-feature-or-fix` and `/fe:create-pull-request` reuse.
    - `error=build_failed` → fix the branch (it is this ticket's code) and push again;
+   - `error=no_node_modules` → the checkout was never installed: `npm ci` in the directory it names, then push again;
    - any other `error=` → its entry in that reference;
    - no theme possible (no `shopify.theme.toml`, no store access) → a running dev server, else the report says "not checked in a browser".
 

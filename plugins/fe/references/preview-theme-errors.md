@@ -107,6 +107,14 @@ in two cases: `--build-script <name>` asked for a build that cannot be run (drop
 re-run), or the line says **`./package.json is at <dir>`** — the run started in a subdirectory of
 that project, whose build was never run, so `cd <dir>` and re-run from there.
 
+### `error=no_node_modules`
+
+`./package.json` lists dependencies but no `node_modules` is installed in the directory the line
+names or above it, so the build would die in Node's resolver. Nothing was built or pushed, no
+store call was made. Run `npm ci` in that directory (a git worktree made without
+`/base:worktree` does not share the main checkout's `node_modules`), then re-run; the script
+never installs.
+
 ### `error=not_a_theme_checkout`
 
 the run started in the wrong directory: none of the theme

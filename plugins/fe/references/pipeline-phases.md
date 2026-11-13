@@ -141,7 +141,9 @@ its brief says otherwise.
    PR title (as `gh pr create` got it — jira-hand-off's `pr_title:`), theme id + preview/editor links, the screenshot files the body's placeholder names, ≤10-line report. The conductor verifies the tick
    and the recorded URL before advancing.
 5. **steps-to-test** — agent; fills the bot wait. Write per
-   `<base root>/references/steps-to-test-format.md` and the section files it indexes: **one numbered list
+   `<base root>/references/steps-to-test-format.md` and the section files it indexes — `Read` each
+   reference file whole, one `Read` call per file, never `cat` or another Bash read (together they are
+   over the host's Bash cap and come back windowed): **one numbered list
    of four items** — Theme · Object · Setup · Edge cases / not obvious — for a feature and a bug alike.
    It tells QA how to set the change up; QA tests it against the AC, so no walk-through, no expected
    results and nothing restated from the Description or AC.

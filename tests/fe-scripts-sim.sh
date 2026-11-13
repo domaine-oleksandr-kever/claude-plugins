@@ -3623,6 +3623,42 @@ if [ "$rc" -ne 0 ] && grep -q 'error=build_script_missing (build)' "$O" \
    && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
 else bad P19s-package-json-dangling-symlink "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
 
+# P19t-P19w (bug): a fresh worktree has package.json but no node_modules, and its build died in Node's
+# resolver as a bare build_failed of stack frames. Dependencies + no node_modules here or above → a
+# named refusal before the store and the build; no dependencies, or --no-build, skips the check.
+CPTNM="$TMP/cpt-nomods"; mkdir -p "$CPTNM/assets" "$CPTNM/sections" "$CPTNM/.git"
+cp "$CPTD/repo/assets/app.css" "$CPTNM/assets/"
+cp "$CPTD/repo/sections/main-product.liquid" "$CPTNM/sections/"
+cp "$CPTD/repo/shopify.theme.toml" "$CPTNM/"
+printf '{"name":"cpt-nomods","private":true,"scripts":{"build":"%s"},"devDependencies":{"vite":"5.0.0"}}\n' "$CPTD/markbuild.sh" > "$CPTNM/package.json"
+rc=0; L="$TMP/cpt19t"; : > "$L"; BM="$TMP/cpt19t.built"; rm -f "$BM"
+run_cpt_at "$CPTNM" "$CPTD/shim:$PATH" "$L" NO=1 CPT_BUILD_MARK="$BM" -- refresh --theme 555 || rc=$?
+if [ "$rc" -eq 1 ] && grep -qF "error=no_node_modules ($(cd "$CPTNM" && pwd -P)) — " "$O" && grep -q 'npm ci' "$O" \
+   && [ ! -f "$BM" ] && ! grep -q '^npm=' "$L" && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad P19t-no-node-modules-refused "rc=$rc out=$(head -c 300 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+rc=0; L="$TMP/cpt19u"; : > "$L"
+run_cpt_at "$CPTNM" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-NM" || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=no_node_modules ' "$O" && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad P19u-create-no-node-modules-refused "rc=$rc out=$(head -c 300 "$O" | tr '\n' ' ')"; fi
+rc=0; L="$TMP/cpt19v"; : > "$L"
+run_cpt_at "$CPTNM" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^built=skipped$' "$O" && ! grep -q 'no_node_modules' "$O"; then ok
+else bad P19v-no-build-skips-node-modules-check "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+# an install in an ancestor is what Node would resolve from, so it counts
+mkdir -p "$CPTNM/node_modules" "$TMP/cpt-nomods-up/node_modules" "$TMP/cpt-nomods-up/theme/.git"
+cp -R "$CPTNM/assets" "$CPTNM/sections" "$CPTNM/shopify.theme.toml" "$CPTNM/package.json" "$TMP/cpt-nomods-up/theme/"
+rc=0; L="$TMP/cpt19w"; : > "$L"; BM="$TMP/cpt19w.built"; rm -f "$BM"
+run_cpt_at "$TMP/cpt-nomods-up/theme" "$CPTD/shim:$PATH" "$L" NO=1 CPT_BUILD_MARK="$BM" -- refresh --theme 555 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^built=yes$' "$O" && [ -f "$BM" ]; then ok
+else bad P19w-ancestor-node-modules-builds "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# no dependencies at all: nothing to install, so the build runs without node_modules
+printf '{"name":"cpt-nodeps","private":true,"scripts":{"build":"%s"},"dependencies":{}}\n' "$CPTD/markbuild.sh" > "$CPTNM/package.json"
+rmdir "$CPTNM/node_modules"
+rc=0; L="$TMP/cpt19x"; : > "$L"; BM="$TMP/cpt19x.built"; rm -f "$BM"
+run_cpt_at "$CPTNM" "$CPTD/shim:$PATH" "$L" NO=1 CPT_BUILD_MARK="$BM" -- refresh --theme 555 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^built=yes$' "$O" && [ -f "$BM" ] && grep -q '^npm=run build$' "$L"; then ok
+else bad P19x-no-dependencies-builds "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
 # P20 (bug): the project's own credential wins over an ambient $SHOPIFY_CLI_THEME_TOKEN — a token
 # exported for another project would otherwise authenticate this repo's pushes against that store
 rc=0; L="$TMP/cpt20"; : > "$L"
@@ -6235,6 +6271,20 @@ dc_rules DCR4c-rules-devtools-no-env 0 'result=ok' 's|by design\.|by design; Dev
 dc_rules DCR5-rules-links-required-absent 1 'fail no page link on a project store in items 2–3' 's| — https://elc-us-mc-uat\.myshopify\.com/products/ruby-woo-lipstick||'
 dc_rules DCR5b-rules-no-page-link-waiver 0 'no_page_link=on' 's| — https://elc-us-mc-uat\.myshopify\.com/products/ruby-woo-lipstick||' --no-page-link
 dc_rules DCR6-rules-preview-link-published 1 'fail preview link with theme: published' 's|ruby-woo-lipstick;|ruby-woo-lipstick?preview_theme_id=156379611322;|'
+# DCR1 is the guard: "the published theme (the theme the TL deploys `develop` to)" passes
+PUBT='fail item 1 does not name the published theme (theme: published'
+dc_rules DCR6b-rules-named-theme 1 "$PUBT" 's|the published theme (the theme the TL deploys `develop` to)|the Develop theme|'
+dc_rules DCR6c-rules-theme-id 1 'fail theme id in item 1 with theme: published' 's|the published theme (the theme the TL deploys `develop` to)|the Develop theme (156379611322)|'
+grep -qF "$PUBT" "$DCD/out" && ok || bad DCR6c-named-too "$(tr '\n' ';' < "$DCD/out")"
+dc_rules DCR6d-rules-editor-url 1 'fail editor URL in item 1 with theme: published' 's|deploys `develop` to)\.|deploys `develop` to), admin.shopify.com/store/elc-us-mc-uat/themes/156379611322/editor.|'
+dc_rules DCR6e-rules-live-theme-ok 0 'result=ok' 's|the published theme (the theme the TL deploys `develop` to)|the live theme|'
+dc_rules DCR6f-rules-unpublished-theme 1 "$PUBT" 's|the published theme (the theme the TL deploys `develop` to)|an unpublished theme|'
+dc_rules DCR6h-rules-bold-name 1 'fail theme named in bold in item 1 with theme: published' 's|the published theme (the theme the TL deploys `develop` to)|theme **develop**, the published theme|'
+dc_rules DCR6i-rules-no-theme-id-words-ok 0 'result=ok' 's|the published theme (the theme the TL deploys `develop` to)|the published theme (no theme id: the plain host opens it)|'
+dc_rules DCR6j-rules-theme-id-digits 1 'fail theme id in item 1 with theme: published' 's|the published theme (the theme the TL deploys `develop` to)|the published theme (theme id: 1563796)|'
+sed 's|^theme: Published$||' "$R" > "$DCD/pr-rules/notheme.md"
+sed 's|the published theme (the theme the TL deploys `develop` to)|the Develop theme (156379611322)|' "$DCD/stt-rules.md" > "$DCD/stt-rules-v.md"
+dc DCR6g-rules-no-theme-key-named-ok 0 'result=ok' file stt "$DCD/stt-rules-v.md" --project-rules "$DCD/pr-rules/notheme.md"
 dc_rules DCR7-rules-relative-handle 1 "$HND" 's|https://elc-us-mc-uat\.myshopify\.com/products/ruby-woo-lipstick|`/products/ruby-woo-lipstick`|'
 dc_rules DCR8-rules-link-in-item4 1 "$HND" 's|by design\.|by design; https://elc-us-cl-uat.myshopify.com/products/x has none.|'
 # DCR9*: a malformed file fails with its named reason, before the draft is read

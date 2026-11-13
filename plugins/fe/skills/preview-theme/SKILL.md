@@ -114,7 +114,8 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    push). A checkout with no `package.json` (in it or any parent up to the repo root) takes
    neither flag — `--build-script` there is refused (`error=build_script_missing`) — the build
    is skipped (`built=skipped_no_package_json` + `warn=build_skipped_no_package_json`, exit 0)
-   and the working tree is pushed as it stands. **Any `error=` line** → report it plainly,
+   and the working tree is pushed as it stands. Dependencies never installed there
+   (a fresh worktree) → `error=no_node_modules`, before any push: `npm ci`, then re-run. **Any `error=` line** → report it plainly,
    then follow its entry in the errors reference — it names whether anything was pushed,
    whether retrying is right, and the recovery. Don't improvise one. An exit-0 run is not
    always reviewable (`overlay=partial` / `empty` / `unverified`): the reading section says

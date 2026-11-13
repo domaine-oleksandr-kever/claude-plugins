@@ -162,7 +162,9 @@
 #       that project's build was never run: refused as `build_script_missing` naming the
 #       directory. Passing `--build-script <name>` where there is no package.json anywhere is
 #       still `build_script_missing`: an explicit build request that cannot be honoured must not
-#       be silently dropped.
+#       be silently dropped. A ./package.json listing dependencies/devDependencies with no
+#       node_modules directory here or in any ancestor is refused as `no_node_modules` (run
+#       `npm ci` there; a git worktree does not share the main checkout's) — the script never installs.
 #       Independent of both the build decision and `--no-build`: a cwd with none of the theme
 #       directories is the wrong directory, refused as `not_a_theme_checkout` before any build
 #       and before the first store call (an empty push root would strip the theme it lands on).
@@ -1005,6 +1007,17 @@ vet_build_script() {
   node -e 'const fs=require("fs");let p;try{p=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}const s=p&&p.scripts;process.exit(s&&typeof s[process.argv[2]]==="string"?0:1)' \
     package.json "$BUILD_SCRIPT" 2>/dev/null \
     || fail "build_script_missing ($BUILD_SCRIPT) — no such script under \`scripts\` in ./package.json (run from the project root); pick one it defines or pass --no-build; nothing was built or pushed"
+  # Without an install the build dies in Node's resolver and build_failed shows only its stack frames.
+  # Any ancestor's node_modules counts, as it does for Node's own lookup.
+  node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(["dependencies","devDependencies"].some(k=>p[k]&&Object.keys(p[k]).length)?0:1)' \
+    package.json 2>/dev/null || return 0
+  local d; d="$(pwd -P)"
+  while :; do
+    [ -d "$d/node_modules" ] && return 0
+    [ "$d" = / ] && break
+    d="${d%/*}"; [ -n "$d" ] || d=/
+  done
+  fail "no_node_modules ($(pwd -P)) — ./package.json lists dependencies but no node_modules is installed here or above; run \`npm ci\` in that directory (a git worktree does not share the main checkout's node_modules), then re-run; nothing was built or pushed"
 }
 BUILD_DIRTIED=""
 BUILD_RESTORED=""

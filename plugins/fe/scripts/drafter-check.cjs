@@ -61,7 +61,8 @@ project-rules.md): an environment word in item 1 the file does not allow fails, 
 its hosts fails, a page link or *.myshopify.com host outside its stores fails, a page link (a
 /products|collections|pages|blogs/<handle> URL) on its hosts in items 2–3 is no handle but fails in a
 code span, behind [label](url) or on a host item 1 does not name,
-theme: published fails a preview link, and links: required fails a field with no page link on its
+theme: published fails a preview link, a theme id or editor URL or a bold theme name in item 1 and an
+item 1 that does not say 'published theme' (or 'live theme'), and links: required fails a field with no page link on its
 hosts — unless --no-page-link (the receipt's 'page_links: none — <why>'). A malformed file fails
 with 'fail project rules: <reason>'; 'rules <file>' prints the parsed values only, and with --prose
 then a 'prose:' line and the file's prose part verbatim ('prose: none' when it has none).
@@ -419,7 +420,13 @@ function checkStt(path, refs, rulesPath, noPageLink) {
       if (linking && lines.some((l) => [...l.matchAll(CODE_SPAN)].some((m) => storeLink(m[2])) || [...l.matchAll(MD_LINK)].some((m) => storeLink(m[1]))))
         fails.push('page link not bare (a code span or [label](url) is not clickable in Jira)');
     }
-    if (rules.theme === 'published' && PREVIEW_ID.test(text)) fails.push('preview link with theme: published (the published theme opens with the plain storefront URL)');
+    if (rules.theme === 'published') {
+      const one = lines.filter((l, i) => itemAt[i] === 1).join('\n');
+      if (PREVIEW_ID.test(text)) fails.push('preview link with theme: published (the published theme opens with the plain storefront URL)');
+      [ROT[1], ['theme id', /\btheme[ _-]?id\s*:?\s*\d|\btheme\s*#?\d{6,}|\b\d{11,14}\b/i]].forEach(([what, re]) => { if (re.test(one)) fails.push(`${what} in item 1 with theme: published (no theme id or editor URL: the plain storefront host opens it)`); });
+      if (/\btheme\s+\*\*(?!(?:published|live)\*\*)[^*]+\*\*|\*\*(?!(?:published|live)\*\*)[^*]+\*\*\s+theme\b/i.test(one)) fails.push('theme named in bold in item 1 with theme: published ("the published theme", never a theme by its name)');
+      if (!/\b(?:published|live) theme\b/i.test(one)) fails.push('item 1 does not name the published theme (theme: published: "the published theme", never a theme by its name)');
+    }
     if (rules.links === 'required' && !links && !noPageLink) fails.push('no page link on a project store in items 2–3 (links: required; a change with no storefront page: --no-page-link with the receipt\'s page_links: none — <why>)');
     ruled.push('rules=on', `page_links=${links}`, `foreign_hosts=${foreign}`, ...(noPageLink ? ['no_page_link=on'] : []));
   }

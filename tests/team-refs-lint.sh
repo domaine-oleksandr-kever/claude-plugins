@@ -416,6 +416,13 @@ done
 for pair in "$FE/skills/preview-theme/SKILL.md|reuse existing / cancel" "$FE/skills/qa-feature-or-fix/SKILL.md|ask which source" "$CPR|confirm against Git Flow" "$FE/skills/create-pull-request/reference/preview-theme.md|create the preview theme now?"; do
   if grep -qF -- "${pair#*|}" "${pair%%|*}"; then bad fe-one-option-gate-back "${pair%%|*} still has: ${pair#*|}"; else ok; fi
 done
+# stt-drafter reads its six rule files with Read, one call each: one `cat` of all of them is over the
+# host's Bash cap and comes back windowed
+STT="$FE/agents/stt-drafter.md"
+if awk '/^## The rules you write by/ { s = 1; next } s && /^## / { exit } s' "$STT" | grep -qF '`Read` each `<base root>` reference file below whole, one `Read` call per file — never `cat` or another'; then ok
+else bad fe-stt-rules-read "stt-drafter.md's rules section does not name Read, one call per file, never cat"; fi
+if awk '/^5\. \*\*steps-to-test\*\*/ { s = 1 } s && /^6\. \*\*/ { exit } s' "$FE/references/pipeline-phases.md" | tr '\n' ' ' | tr -s ' ' | grep -qF '`Read` each reference file whole, one `Read` call per file, never `cat` or another Bash read'; then ok
+else bad fe-ship-stt-rules-read "pipeline-phases.md's steps-to-test phase does not name Read, one call per file, never cat"; fi
 if [ -f "$ROOT/plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js" ]; then ok
 else bad fe-fbc-template "plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js missing"; fi
 

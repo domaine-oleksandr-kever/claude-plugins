@@ -819,6 +819,9 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   eq('Cr3-source-json', call('Cr3', T, chEnv(T, 'read', 'Read', { file_path: path.join(tpl, 'x.json') }, readRec(path.join(tpl, 'x.json'), page, { truncatedByTokenCap: true }))).reason, 'read-guard');
   const code = readFileSync(SLIM, 'utf8');
   eq('Cr3-code', call('Cr3c', T, chEnv(T, 'read', 'Read', { file_path: SLIM }, readRec(SLIM, code, { truncatedByTokenCap: true }))).reason, 'read-guard');
+  // fe:stt-drafter Reads its rule files one by one: plugin reference markdown comes back whole.
+  const rules = path.join(ROOT, 'plugins/base/references/steps-to-test/item-rules.md');
+  eq('Cr3-reference-md', call('Cr3r', T, chEnv(T, 'read', 'Read', { file_path: rules }, readRec(rules, readFileSync(rules, 'utf8')))).reason, 'read-guard');
   eq('Cr4-offset', call('Cr4', T, chEnv(T, 'read', 'Read', { file_path: fp, offset: 10 }, readRec(fp, page, { truncatedByTokenCap: true }))).reason, 'windowed-read');
   eq('Cr5-spill-read', call('Cr5', T, chEnv(T, 'read', 'Read', { file_path: h }, readRec(h, page, { truncatedByTokenCap: true }))).reason, 'spill-read');
   const logp = path.join(T, 'data', 'app.log');

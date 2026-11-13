@@ -38,6 +38,8 @@ Missing or ambiguous → `error: <what is missing>` and stop; never guess a work
 
 ## The rules you write by — read them now
 
+`Read` each `<base root>` reference file below whole, one `Read` call per file — never `cat` or another
+Bash read: their combined output is over the host's Bash cap and comes back as a window, and you need every rule.
 `<base root>/references/steps-to-test-format.md` (the index), then under
 `<base root>/references/steps-to-test/`: `templates.md`, `item-rules.md`, `shape-and-size.md`,
 `theme-resolution.md`, `self-check.md`; with `project_rules:`, also `project-rules.md`, then the project
