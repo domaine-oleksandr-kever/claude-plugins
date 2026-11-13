@@ -33,7 +33,7 @@ four below and no other: anything else, `paths:` included, is an unknown key.
 | Key | Values | Effect |
 |---|---|---|
 | `environment` | `UAT`, or a list `[UAT, Prod]` — DEV, UAT, Prod, any case | item 1 names one of them and no other |
-| `theme` | `published` | item 1 names the store's published theme: no theme question, no preview link |
+| `theme` | `published` | item 1 names the store's published theme as "the published theme": no theme question, no theme id, editor URL or preview link |
 | `links` | `required`, `optional`, `off` (the default) | `required`: items 2–3 carry at least one page link on a listed host; `optional`: they may; `off`: the general rule, no catalog handle |
 | `stores` | a list of entries: `- brand: <brand>`, `store: <handle>`, `host: <storefront host>`; `host` required | the only storefront hosts the field names: item 1 names at least one, and a page link sits on a host item 1 names; required unless `links` is `off` |
 

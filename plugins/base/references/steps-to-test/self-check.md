@@ -15,7 +15,7 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   the `?preview_theme_id=` link is withheld with the placeholder theme, an unconfirmed id or a Prod store (route form instead); the
   preview link is bare (no code span, no label); the environment and the store never contradict each
   other. With a project rules file: its environment and a listed store only, and with `theme: published`
-  the published theme with no preview link.
+  "the published theme" by those words, with no theme id, editor URL or preview link.
 - Item 2 names where the change lives — every page by path, the section / block by its admin label, every
   surface it reaches — and, for a change not visible on screen, the tool, panel and filter, every
   `DevTools > Network` panel mention with its filter (the Network request blocking / conditions drawers are no

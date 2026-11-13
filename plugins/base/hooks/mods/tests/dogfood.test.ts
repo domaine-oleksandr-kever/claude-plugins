@@ -17,7 +17,7 @@ const FAILED = { isError: true, result: 'Exit code 1\nError: bad input', text: '
 const REFUSALS = [
   'usage (get needs --theme and --file)', 'usage: session-theme.sh unpin <toml> (--help prints usage)', 'unknown_arg arg=--x (--help prints usage)',
   'unknown_command cmd=x', 'unknown arg: --x (--help prints usage)', 'missing_value flag=--theme', 'missing value for --name', 'create requires --name "<new theme name>"',
-  'no_store (pass --store)', "invalid_store store='x'", 'ambiguous_env envs=a,b toml=t', 'env_not_found env=x toml=t', "bad_theme_id value='x'",
+  'no_store (pass --store)', 'no_node_modules (/x) — run `npm ci`', "invalid_store store='x'", 'ambiguous_env envs=a,b toml=t', 'env_not_found env=x toml=t', "bad_theme_id value='x'",
   'bad_file path=../x', 'file_not_writable path=x', 'theme_not_found theme=1', 'dev_theme_not_found dev_theme=1', 'file_not_found_or_not_text file=x theme=1',
   'not_applied engine=gql theme=1 file=x', 'upload_rejected theme=1 file=x reason=y', 'dev_theme_write_refused theme=1', 'live_theme_write_refused theme=1', 'from_file_refused file=.env',
   'invalid_variables_json (--variables must be valid JSON)', 'variables_file_not_found file=v.json', 'no_such_dir dir=x', 'invalid_engine engine=x',

@@ -11,9 +11,10 @@ One section of the Steps to Test format; the index is `../steps-to-test-format.m
   project rule: the rule wins, item 1 names the listed store of the same brand, and `unconfirmed: store:` names
   both facts. Never a DEV store in the field when the file allows UAT only. A brand with no listed store →
   `unconfirmed: store:`, no host guessed.
-- **Theme** — with `theme: published`: the store's published theme, named as that ("the published theme"; "the
-  theme the TL deploys `develop` to" when the file or `notes.md` says so), opened by the plain storefront
-  host: no theme question, no id, no preview link. Without `theme`, the order below picks the theme, on a
+- **Theme** — with `theme: published`: the store's published theme, named as that: item 1 says "the published
+  theme" (or "the live theme"), with "the theme the TL deploys `develop` to" beside it when the file or `notes.md`
+  says so, never a theme by its own name; opened by the plain storefront host: no theme question, no id, no
+  editor URL, no preview link. Without `theme`, the order below picks the theme, on a
   listed store only.
 
 Without a project rules file, or with one that has no `theme`, in order, stopping at the first that answers:
