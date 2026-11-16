@@ -32,7 +32,8 @@ const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[
 /** `lookup` = the lookup tool is registered (SLIM_LOOKUP is not 0). */
 export function denyText(lookup: boolean): string {
   return 'slim: a bare curl of a page is turned off here (SLIM_CURL=deny) — ' +
-    (lookup ? 'for one fact call mcp__slim__lookup({ url, question }); for the page content use WebFetch(url, prompt).' : 'use WebFetch(url, prompt).')
+    (lookup ? 'for one fact call mcp__slim__lookup({ url, question }); for the page content use WebFetch(url, prompt). Both need' : 'use WebFetch(url, prompt). It needs') +
+    ' the WebFetch tool; without it in this session use WebSearch.'
 }
 
 type $ = EngineInterface

@@ -24,7 +24,7 @@ export const VIEW_DESC =
   'file under .claude/tasks/<id>/ or .claude/tmp/ of the session root or the working directory (or slim\'s spill root), reused while ' +
   'it is newer than the input. An image becomes a JPEG copy at most 1568 px on its long edge and about 150 KB (one ' +
   'already within both stays as it is) and a video a folder of frames, beside the input; the reply\'s last line names the one image to Read. ' +
-  'Give exactly one of path or command; for a URL use WebFetch.'
+  'Give exactly one of path or command; for a URL use WebFetch, or WebSearch in a session without WebFetch.'
 export const VIEW_SCHEMA = {
   type: 'object',
   properties: {
@@ -38,7 +38,7 @@ export const VIEW_SCHEMA = {
 export const BAD_ARGS = 'view: give exactly one of path or command'
 /** `lookup` = the lookup tool is registered (SLIM_LOOKUP is not 0). */
 export function noUrlText(lookup: boolean): string {
-  return `view: there is no url mode — for a page use WebFetch(url, prompt)${lookup ? ', or mcp__slim__lookup({ url, question }) for one fact' : ''}`
+  return `view: there is no url mode — for a page use WebFetch(url, prompt)${lookup ? ', or mcp__slim__lookup({ url, question }) for one fact (it asks WebFetch too)' : ''}; without WebFetch in this session use WebSearch`
 }
 export const INLINE = 16384
 const HEAD_LINES = 40

@@ -38,7 +38,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.17.4**.
+Current release: **slim v0.17.5**.
 
 ## Install
 
@@ -500,6 +500,10 @@ source into context:
   the failure opens with one line:
   `URL lookups need a WebFetch verdict here — use WebSearch or ask the user to allow WebFetch`. It
   then leaves out the usual "use WebFetch, Read or Bash" advice.
+  `url` needs the session's WebFetch tool. In a session or agent without it (WebFetch deferred in a
+  subagent, a host that ships a web-fetch agent instead), the failure opens with
+  `URL lookups need the WebFetch tool, which this session does not have — use WebSearch, a web-fetch
+  subagent where the session has one, or Bash curl` and leaves out that advice too.
 - `path`: slim first reads one line through Read, so every PreToolUse hook rules on the path. The
   core then distills the file that Read actually opened, so it obeys a hook that rewrote the path. It
   asks a small model once.

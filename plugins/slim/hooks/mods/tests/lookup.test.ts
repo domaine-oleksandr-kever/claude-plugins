@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BAD_ARGS, HEADER, LOOKUP_DESC, LOOKUP_SCHEMA, NO_QUESTION, NO_VERDICT_HINT, SYS, verified, webFetchPrompt } from '../lookup.ts'
+import { BAD_ARGS, HEADER, LOOKUP_DESC, LOOKUP_SCHEMA, NO_QUESTION, NO_VERDICT_HINT, NO_WEBFETCH_HINT, SYS, urlFailureText, verified, webFetchPrompt } from '../lookup.ts'
 import { VIEW_DESC, VIEW_SCHEMA } from '../view.ts'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; timeoutMs?: number } }
@@ -99,6 +99,10 @@ describe('L1 registration', () => {
     ])
   })
 
+  test('the description says url mode goes through the session\'s WebFetch tool and fails without one', () => {
+    expect(LOOKUP_DESC).toContain('the session\'s WebFetch tool (url fails in a session or agent without one)')
+  })
+
   test('SLIM_LOOKUP=0: lookup not registered (view still is)', async ($, on) => {
     const w = world(on, { env: { SLIM_LOOKUP: '0' } })
     await start($)
@@ -127,6 +131,18 @@ describe('L2 url', () => {
     const reason = 'The server-side auto mode classifier gave no verdict for WebFetch. Retry once.'
     world(on, { below: () => ({ deny: reason }) })
     expect(await lookup($, { url: URL, question: 'q?' })).toBe(`${NO_VERDICT_HINT}\nlookup failed: ${reason}`)
+  })
+
+  test('no WebFetch tool in this session (the host\'s rejection): the hint above the reason, no WebFetch advice', () => {
+    const reason = 'WebFetch failed: slim: $.tool.call: no tool named "WebFetch" in this session'
+    const text = urlFailureText(reason)
+    expect(text).toBe(`${NO_WEBFETCH_HINT}\nlookup failed: ${reason}`)
+    expect(text).not.toContain('use WebFetch(url, prompt)')
+  })
+
+  test('a WebFetch call rejected for another reason: the usual failure', async ($, on) => {
+    world(on, { below: () => { throw new Error('boom') } })
+    expect(await lookup($, { url: URL, question: 'q?' })).toMatch(/^lookup failed: WebFetch failed: .* — use WebFetch\(url, prompt\), Read or Bash instead$/)
   })
 
   test('a long WebFetch answer is cut to fit 1 KB, header kept', async ($, on) => {

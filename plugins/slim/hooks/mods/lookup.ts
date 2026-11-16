@@ -15,7 +15,8 @@ const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[
 export const LOOKUP_TOOL = 'mcp__slim__lookup'
 export const LOOKUP_DESC =
   'Answer ONE question about a web page (url), a shell command\'s output (command) or a local file (path) without ' +
-  'loading it into context: a page is asked through WebFetch, an output or a file is distilled by slim and asked of a ' +
+  'loading it into context: a page is asked through the session\'s WebFetch tool (url fails in a session or agent ' +
+  'without one), an output or a file is distilled by slim and asked of a ' +
   'small model. Returns a short answer with an evidence quote (at most 1 KB). Use it instead of curl/cat when you ' +
   'need one fact; use WebFetch or Read when you need the content itself.'
 export const LOOKUP_SCHEMA = {
@@ -121,6 +122,16 @@ export function failureText(reason: string): string {
 /** Replaces the fallback advice of a URL failure whose reason is the host's auto-mode classifier giving WebFetch no verdict. */
 export const NO_VERDICT_HINT = 'URL lookups need a WebFetch verdict here — use WebSearch or ask the user to allow WebFetch'
 
+/** Replaces the fallback advice of a URL failure whose reason is the host saying this session has no WebFetch tool. */
+export const NO_WEBFETCH_HINT =
+  'URL lookups need the WebFetch tool, which this session does not have — use WebSearch, a web-fetch subagent where the session has one, or Bash curl'
+
+/** A URL failure's text: a hint in place of the fallback advice when the reason is one the advice cannot help. */
+export function urlFailureText(reason: string): string {
+  const hint = /no verdict for WebFetch/i.test(reason) ? NO_VERDICT_HINT : /no tool named "?WebFetch\b/i.test(reason) ? NO_WEBFETCH_HINT : null
+  return hint ? `${hint}\nlookup failed: ${reason}` : failureText(reason)
+}
+
 const inTokens = (t: Tokens) => t.input + t.cache_read + t.cache_creation
 
 function tokensOf(u: ModelUsage | undefined): Tokens | null {
@@ -182,7 +193,7 @@ export const webFetchPrompt = (question: string) =>
 
 async function answerUrl($: $, url: string, question: string): Promise<Outcome> {
   const fail = (reason: string): Outcome => ({
-    text: /no verdict for WebFetch/i.test(reason) ? `${NO_VERDICT_HINT}\nlookup failed: ${reason}` : failureText(reason),
+    text: urlFailureText(reason),
     decision: 'failed', reason, rung: 'webfetch', engine: null, model: 'webfetch', tokens: null, bytesIn: 0,
   })
   if (!/^https?:\/\//i.test(url)) return fail('url must be http or https (use path for a local file)')
