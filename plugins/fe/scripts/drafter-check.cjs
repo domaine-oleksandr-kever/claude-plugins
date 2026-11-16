@@ -32,7 +32,7 @@
 //                                                --table (the developer asked for one): then its rows are no
 //                                                brief lines; --extended (the developer asked for more than the
 //                                                brief): only the first block after the PR line is the brief,
-//                                                and none when that block has no bullet
+//                                                and none when that block opens with a non-bullet line
 //   drafter-check.cjs receipt stt|pr|jira        the drafter's reply on stdin: one kind, no empty field;
 //                                                stt: `ac: empty` and a non-empty `ac_proposal:` come together;
 //                                                `page_links: none — <why>` and `pages_needed:` never together
@@ -78,8 +78,8 @@ The jira check fails a GFM table (a pipe row over a --- separator row); --table,
 developer asked for a table in the comment, takes its rows out of the brief's line count and bullet
 check. Prints tables=<n>. --extended, only when the developer asked for more than the brief: the
 brief is the first block of non-blank lines after the PR line (still at most 6 lines, all bullets,
-no bare label) — a first block with no bullet line is no brief (brief_lines=0) and opens the
-extension; every line after the brief is the extension, exempt from the line count, the
+no bare label) — a first block whose first line is not a bullet (a paragraph, a bare label) is no
+brief (brief_lines=0) and opens the extension; every line after the brief is the extension, exempt from the line count, the
 bullet check and the label check; the heading, None/N/A, rot, brief-text and attribution checks
 still read every line, and a table anywhere still needs --table. Prints extended_lines=<n> (0
 without --extended).
@@ -527,7 +527,7 @@ function tableRows(raw) {
 const BULLET = /^\s*[-*]\s+\S/;
 const BRIEF_KEY = /^\s*(?:workspace|mode|answers|ticket|target|findings|related|screenshot_dir|previous|feedback|question|pr_url|pr_title|brief|table|extended):\s|^\s*(?:branch|base)=/;
 
-/** Jira PR-link comment: the PR line first, brief lines ≤ 6, no bare label, no None/N/A, nothing that rots, no brief text, attribution; a table only with `table` (the developer's request), its rows outside the brief; with `extended`, only the first block after the PR line is the brief, and a first block with no bullet is none. */
+/** Jira PR-link comment: the PR line first, brief lines ≤ 6, no bare label, no None/N/A, nothing that rots, no brief text, attribution; a table only with `table` (the developer's request), its rows outside the brief; with `extended`, only the first block after the PR line is the brief, and a first block that opens with a non-bullet line (a paragraph, a bare label) is none. */
 function checkJira(path, table, extended) {
   const fails = [];
   const text = readFile(path, fails);
@@ -545,8 +545,9 @@ function checkJira(path, table, extended) {
     while (i > 0 && i < raw.length && !raw[i].trim()) i++;
     let end = i;
     while (end > 0 && end < raw.length && raw[end].trim()) end++;
-    // a first block with no bullet is no brief (`brief: no`): it opens the extension
-    if (!body.some((k) => k < end && BULLET.test(raw[k]))) end = i;
+    // a first block that opens with no bullet (a paragraph, a `Done:` label) is no brief: it opens the extension
+    const first = body.find((k) => k < end);
+    if (first === undefined || !BULLET.test(raw[first])) end = i;
     extension = body.filter((k) => k >= end);
     body = body.filter((k) => k < end);
   }

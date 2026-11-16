@@ -17,7 +17,7 @@ set -u
 unset SHOPIFY_CLI_THEME_TOKEN SHOPIFY_STORE \
       FE_GQL_PROBE_CACHE TOML_PATH SHOPIFY_ADMIN_API_VERSION SHOPIFY_FLAG_ENVIRONMENT \
       FE_PROFILE FE_CPT_THROTTLE_WAITS FE_CPT_OVERLAY_VERIFY FE_CPT_OVERLAY_VERIFY_WAIT \
-      FE_THEME_JSON_VERIFY FE_THEME_JSON_VERIFY_WAIT
+      FE_THEME_JSON_VERIFY FE_THEME_JSON_VERIFY_WAIT FE_THEME_JSON_CLI_WAIT
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GQL="$ROOT/plugins/fe/scripts/shopify-admin-gql.sh"
@@ -225,6 +225,7 @@ touch "${TJ_CLI_MARKER:-/dev/null}"
 if [ -n "${TJ_CLI_LOG:-}" ]; then
   printf 'argv=%s\n' "$*" >> "$TJ_CLI_LOG"
   printf 'token=%s\n' "${SHOPIFY_CLI_THEME_TOKEN:-}" >> "$TJ_CLI_LOG"
+  printf 'no_input=%s\n' "${SHOPIFY_FLAG_NO_INPUT:-}" >> "$TJ_CLI_LOG"
 fi
 # --path/--only are parsed so `theme pull` can materialize a file the way the real CLI does —
 # that pull IS the `set` read-back verify. TJ_PULL_BODY (a file) becomes <path>/<only>;
@@ -240,7 +241,13 @@ fi
 # and `ts` are plain failures whose text merely contains the digits 401; anything else is a plain
 # failure (a pull's is the 503 shape). `json401` (list, push) is CLI 4.x under --json: the same
 # rejection as an {"error":{"message":…}} envelope on STDOUT with stderr empty; `json0` (list) is
-# that envelope with exit 0; `session` (list) is a CLI with no usable login.
+# that envelope with exit 0; `session` (list) is a CLI with no usable login. `device0`/`device1`
+# (list, push) are an expired session's device-code login — the link line on stdout, the failure on
+# stderr — ending in exit 0/1; `noinput` (list) is that session under SHOPIFY_FLAG_NO_INPUT (an
+# immediate refusal, exit 1); `devicehang` (list) prints the link and blocks, `hang` (list, pull)
+# blocks silently. TJ_STDIN_LOG receives whatever the CLI could read on stdin.
+[ -z "${TJ_STDIN_LOG:-}" ] || cat > "$TJ_STDIN_LOG"
+TJ_DEV_LINK='{"level":"info","message":"Opened link to start the auth process: https://accounts.shopify.com/activate-with-code?device_code%5Buser_code%5D=FAKE-CODE"}'
 path=""; only=""; prev=""
 for a in "$@"; do
   case "$prev" in --path) path="$a" ;; --only) only="$a" ;; esac
@@ -260,12 +267,21 @@ case "$*" in
       json401) printf '%s\n' '{"error":{"type":"abort","message":"Error connecting to your store x.myshopify.com: GraphQL Error (Code: 401): [API] Invalid API key or access token 401 undefined"}}'; exit 1 ;;
       json0) printf '%s\n' '{"error":{"type":"abort","message":"Error: something odd"}}'; exit 0 ;;
       session) echo 'To run this command, log in to Shopify. Run `shopify auth login`.' >&2; exit 1 ;;
+      device0|device1) printf '%s\n' "$TJ_DEV_LINK"; echo 'Device authorization failed: Token expired. Please try again.' >&2
+                       exit "${TJ_LIST_FAIL#device}" ;;
+      noinput) echo 'To run this command, log in to Shopify.'
+               echo 'Authorization is required to continue, but the current environment does not support interactive prompts.' >&2; exit 1 ;;
+      devicehang) printf '%s\n' "$TJ_DEV_LINK"; sleep 20; exit 0 ;;
+      hang) sleep 20; exit 0 ;;
       *)   echo 'Error: getaddrinfo ENOTFOUND (network unreachable)' >&2; exit 1 ;;
     esac
     if [ -n "${TJ_LIST_JSON:-}" ]; then printf '%s\n' "$TJ_LIST_JSON"
     else printf '[{"id":2,"name":"Dev","role":"development"}]\n'; fi ;;
   *"theme push"*)
     [ "${TJ_PUSH_FAIL:-}" = 401 ] && { printf '%s\n' '│  401 undefined  │' >&2; exit 1; }
+    case "${TJ_PUSH_FAIL:-}" in device0|device1)
+      printf '%s\n' "$TJ_DEV_LINK" >&2; echo 'Device authorization failed: Token expired. Please try again.' >&2
+      printf '{}\n'; exit "${TJ_PUSH_FAIL#device}" ;; esac
     [ "${TJ_PUSH_FAIL:-}" = json401 ] && { printf '%s\n' '{"error":{"type":"abort","message":"GraphQL Error (Code: 401): Invalid API key or access token 401 undefined"}}'; exit 1; }
     if [ -n "${TJ_PUSH_SAVE:-}" ] && [ -n "$path" ] && [ -n "$only" ]; then cp "$path/$only" "$TJ_PUSH_SAVE"; fi
     pj="${TJ_PUSH_JSON:-}"; [ -n "$pj" ] || pj='{}'
@@ -274,6 +290,7 @@ case "$*" in
     [ -z "${TJ_PUSH_RC:-}" ] || exit "$TJ_PUSH_RC" ;;
   *"theme pull"*)
     [ "${TJ_PULL_FAIL:-}" = 401 ] && { printf '%s\n' '│  401 undefined  │' >&2; exit 1; }
+    [ "${TJ_PULL_FAIL:-}" = hang ] && { sleep 20; exit 0; }
     [ -n "${TJ_PULL_FAIL:-}" ] && { echo "Error: could not pull (503)" >&2; exit 1; }
     # TJ_PULL_TREE (a dir): a glob pull (where-used) — the whole tree lands under --path
     if [ -n "${TJ_PULL_TREE:-}" ] && [ -n "$path" ]; then cp -R "$TJ_PULL_TREE/." "$path/"; exit 0; fi
@@ -1060,13 +1077,14 @@ if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O" && [ "$(cat "$C47")" = 2 
 else bad T47b-garbled-then-clean "rc=$rc pulls=$(cat "$C47") out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 # T47c: an unusable FE_THEME_JSON_VERIFY_WAIT falls back to the default instead of handing
 # `sleep` an argument it refuses — under `set -e` that would abort the verify mid-run. A `sleep`
-# shim records the pauses (the default pair, 2 then 5) instead of paying them.
+# shim records the pauses (the default pair, 2 then 5) instead of paying them; its `1` lines are the
+# themecli watchdog's ticks, not verify pauses.
 TJS="$TMP/tj47-sleep"; mkdir -p "$TJS"
 printf '#!/bin/sh\necho "$1" >> "%s"\n' "$TJS/sleeps" > "$TJS/sleep"; chmod +x "$TJS/sleep"
 rc=0; : > "$TJS/sleeps"
 FE_THEME_JSON_VERIFY_WAIT=soon TJ_PULL_BODY="$TV/old.json" PATH="$TJS:$PATH" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && ! grep -qi 'sleep' "$E" \
-   && [ "$(tr '\n' ' ' < "$TJS/sleeps")" = "2 5 " ]; then ok
+   && [ "$(grep -vx 1 "$TJS/sleeps" | tr '\n' ' ')" = "2 5 " ]; then ok
 else bad T47c-invalid-wait "rc=$rc sleeps=$(tr '\n' ';' < "$TJS/sleeps") out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 # T47d: `1.2.3` is the shape a bytes-only filter lets through — `sleep` still refuses it, and under
 # `set -e` that aborted the verify AFTER the mutation had committed, stranding the caller with no
@@ -1074,7 +1092,7 @@ else bad T47c-invalid-wait "rc=$rc sleeps=$(tr '\n' ';' < "$TJS/sleeps") out=$(h
 rc=0; : > "$TJS/sleeps"
 FE_THEME_JSON_VERIFY_WAIT=1.2.3 TJ_PULL_BODY="$TV/old.json" PATH="$TJS:$PATH" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && ! grep -qi 'sleep' "$E" \
-   && [ "$(tr '\n' ' ' < "$TJS/sleeps")" = "2 5 " ]; then ok
+   && [ "$(grep -vx 1 "$TJS/sleeps" | tr '\n' ' ')" = "2 5 " ]; then ok
 else bad T47d-multidot-wait "rc=$rc sleeps=$(tr '\n' ';' < "$TJS/sleeps") out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 # T47e: theme-json.sh itself fills its switches from the domaine env files, not just the reader
 # (EV4 proves the reader). A `sleep` shim records the pause the retry asks for: the project
@@ -1087,7 +1105,7 @@ rc=0; : > "$TJE/sleeps"; C47e="$TMP/tj47e-pulls"; : > "$C47e"
 ( unset FE_THEME_JSON_VERIFY_WAIT FE_THEME_JSON_VERIFY; cd "$TJE/proj/sub" \
   && PATH="$TJE/shim:$PATH" TJ_PULL_BODY="$TV/old.json" TJ_PULL_COUNT="$C47e" \
      tj_set_cli "$TV/new.json" ) >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && [ "$(tr '\n' ' ' < "$TJE/sleeps")" = "0.5 1.25 " ] \
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && [ "$(grep -vx 1 "$TJE/sleeps" | tr '\n' ' ')" = "0.5 1.25 " ] \
    && [ "$(cat "$C47e")" = 3 ]; then ok
 else bad T47e-project-env-wait "rc=$rc sleeps=$(tr '\n' ';' < "$TJE/sleeps") pulls=$(cat "$C47e") out=$(head -c 200 "$O")"; fi
 printf 'FE_THEME_JSON_VERIFY=0\n' > "$TJE/xdg/domaine/env"
@@ -1251,6 +1269,61 @@ assert T57d-session-fail-error-line 5 "$rc" "$E" "error=cli_list_failed store=ac
 if grep -qF "hint=no Theme Access token for acme-uk.myshopify.com (the password= in $TT/single.toml [environments.development] is acme-dev's" "$E" \
    && grep -q 'shopify auth login' "$E" && ! grep -q 'PER STORE' "$E"; then ok
 else bad T57e-session-fail-hint "err=$(tr '\n' ';' < "$E" | head -c 400)"; fi
+
+# T60: an expired CLI session makes `shopify theme …` run its device-code login — a browser, minutes
+# of polling, then "Device authorization failed" with any exit status. It is error=auth_expired
+# ahead of every other verdict (never cli_list_failed, never ok=), with the login hint and without
+# the one-time link; stdin is closed, so the CLI never reads the caller's input.
+tj_set_session() { # tj_set_session — themecli `set` on the CLI session (a --store the toml does not name)
+  TOML_PATH="$TT/single.toml" PATH="$TJSHIM:$PATH" \
+    "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store acme-uk \
+    --theme 2 --file templates/product.json --from "$TV/new.json"
+}
+for d in device0 device1; do
+  rc=0; L="$TMP/tjl60$d"; : > "$L"; SL="$TMP/tjs60$d"
+  printf 'y\n' | TJ_LIST_FAIL=$d TJ_CLI_LOG="$L" TJ_STDIN_LOG="$SL" tj_set_session >"$O" 2>"$E" || rc=$?
+  assert "T60-$d-auth-expired" 5 "$rc" "$E" "^error=auth_expired store=acme-uk.myshopify.com token_source=session$"
+  if grep -q '^hint=.*shopify auth login' "$E" && grep -q 'Device authorization failed' "$E" \
+     && ! grep -q 'activate-with-code\|cli_list_failed\|theme_not_found' "$E" && ! grep -q '"ok"' "$O" \
+     && ! grep -q 'argv=theme push' "$L" && [ ! -s "$SL" ]; then ok
+  else bad "T60b-$d-classified-first" "out=$(head -c 120 "$O") err=$(tr '\n' ';' < "$E" | head -c 400) stdin=$(head -c 20 "$SL")"; fi
+done
+# T60c: the push itself running into the login (exit 0, an empty envelope) is no write: no read-back, no ok=
+rc=0; C60="$TMP/tj60-pulls"; : > "$C60"
+TJ_PUSH_FAIL=device0 TJ_PULL_COUNT="$C60" TJ_PULL_BODY="$TV/new.json" tj_set_session >"$O" 2>"$E" || rc=$?
+assert T60c-push-device-exit0 5 "$rc" "$E" "^error=auth_expired store=acme-uk.myshopify.com token_source=session$"
+if [ ! -s "$C60" ] && ! grep -q '"ok"' "$O" && ! grep -q 'upload_rejected\|cli_push_failed' "$E"; then ok
+else bad T60d-push-device-no-readback "pulls=$(cat "$C60") out=$(head -c 120 "$O") err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
+# T60e: a login that blocks is stopped as soon as its link shows, not after the wait
+rc=0; t0=$(date +%s)
+FE_THEME_JSON_CLI_WAIT=30 TJ_LIST_FAIL=devicehang tj_set_session >"$O" 2>"$E" || rc=$?
+t=$(( $(date +%s) - t0 ))
+assert T60e-device-hang-auth-expired 5 "$rc" "$E" "^error=auth_expired "
+if [ "$t" -lt 10 ]; then ok; else bad T60f-device-hang-stopped-on-sight "took ${t}s"; fi
+# T60g: a CLI that hangs silently is stopped after FE_THEME_JSON_CLI_WAIT seconds
+rc=0; t0=$(date +%s)
+FE_THEME_JSON_CLI_WAIT=1 TJ_LIST_FAIL=hang tj_set_session >"$O" 2>"$E" || rc=$?
+t=$(( $(date +%s) - t0 ))
+assert T60g-hang-timeout 5 "$rc" "$E" "^error=cli_timeout store=acme-uk.myshopify.com token_source=session seconds=1 "
+if [ "$t" -lt 10 ] && grep -q '^hint=.*FE_THEME_JSON_CLI_WAIT' "$E" && ! grep -q '"ok"' "$O"; then ok
+else bad T60h-hang-bounded "took ${t}s err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
+# T60i: every call runs with SHOPIFY_FLAG_NO_INPUT=1, and the CLI's no-prompt refusal on an expired
+# session is auth_expired with the login hint, not cli_list_failed
+rc=0; L="$TMP/tjl60i"; : > "$L"
+TJ_LIST_FAIL=noinput TJ_CLI_LOG="$L" tj_set_session >"$O" 2>"$E" || rc=$?
+assert T60i-noinput-auth-expired 5 "$rc" "$E" "^error=auth_expired store=acme-uk.myshopify.com token_source=session$"
+if grep -qx 'no_input=1' "$L" && ! grep -q 'no_input=$' "$L" && grep -q '^hint=.*shopify auth login' "$E" \
+   && ! grep -q 'cli_list_failed' "$E" && ! grep -q '"ok"' "$O"; then ok
+else bad T60j-noinput-flag-and-hint "log=$(grep -v token "$L" | tr '\n' ';') err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
+# T60k: a read-back that hangs after a push that went through is no CLI failure (exit 5) but the
+# unconfirmed-state verdict: note=cli_timeout per attempt, every retry run, error=verify_read_failed, exit 6
+rc=0; C60k="$TMP/tj60k-pulls"; : > "$C60k"; t0=$(date +%s)
+FE_THEME_JSON_CLI_WAIT=1 TJ_PULL_FAIL=hang TJ_PULL_COUNT="$C60k" tj_set_session >"$O" 2>"$E" || rc=$?
+t=$(( $(date +%s) - t0 ))
+if [ "$rc" -eq 6 ] && grep -q '^error=verify_read_failed engine=themecli theme=2 ' "$O" \
+   && [ "$(grep -c '^note=cli_timeout store=acme-uk.myshopify.com ' "$E")" -eq 3 ] \
+   && ! grep -q '^error=cli_timeout' "$E" && [ "$t" -lt 15 ]; then ok
+else bad T60k-readback-hang-exit6 "rc=$rc took ${t}s out=$(head -c 160 "$O") err=$(tr '\n' ';' < "$E" | head -c 400)"; fi
 
 # T58e (bug): a resolved block naming ANOTHER store is not the end of the search — a sibling block
 # naming the --store holds that store's own token, and the default `dev` block existing must not
@@ -6744,7 +6817,7 @@ dc DC44o-jira-extended-brief-too-long 1 'fail brief longer than 6 lines' file ji
 { cat "$DCD/jira-brief.md"; printf '\n| Icon | Change |\n| --- | --- |\n| a | b |\n'; } > "$DCD/jira-ext-table.md"
 dc DC44p-jira-extension-table-no-flag 1 'fail table in the comment' file jira "$DCD/jira-ext-table.md" --extended
 dc DC44q-jira-extension-table-flag-ok 0 'extended_lines=0' file jira "$DCD/jira-ext-table.md" --extended --table
-# DC44r: brief: no + extended: — a first block with no bullet is no brief, it opens the extension
+# DC44r: brief: no + extended: — a first block that opens with no bullet is no brief, it opens the extension
 printf 'PR: https://github.com/o/r/pull/12 — t\n\nThe scent notes come from the product metaobject.\n\n- a\n- b\n' > "$DCD/jira-ext-plain.md"
 dc DC44r-jira-extended-no-brief-ok 0 'brief_lines=0' file jira "$DCD/jira-ext-plain.md" --extended
 grep -qx 'extended_lines=3' "$DCD/out" && ok || bad DC44r-extended-count "$(tr '\n' ';' < "$DCD/out")"
@@ -6752,6 +6825,15 @@ dc DC44r2-jira-no-brief-prose-without-flag 1 'fail brief line is not a bullet' f
 # DC44r3: a first block that mixes a bullet with prose is still the brief and fails its bullet check
 printf 'PR: https://github.com/o/r/pull/12 — t\n\n- Adds the section.\nPlain prose in the brief.\n\nMore detail.\n' > "$DCD/jira-ext-mixed.md"
 dc DC44r3-jira-extended-mixed-brief 1 'fail brief line is not a bullet' file jira "$DCD/jira-ext-mixed.md" --extended
+# DC44r4: a first block that opens with a bare label is a labelled list the developer asked for, not the brief
+{ printf 'PR: https://github.com/o/r/pull/12 — t\n\nDone:\n'; for n in 1 2 3 4 5 6 7 8 9 10 11 12; do printf -- '- Change %s.\n' "$n"; done
+  printf '\nPer design:\n'; for n in 1 2 3 4 5 6 7; do printf -- '- Spec %s.\n' "$n"; done; } > "$DCD/jira-ext-labelled.md"
+dc DC44r4-jira-extended-labelled-list-ok 0 'brief_lines=0' file jira "$DCD/jira-ext-labelled.md" --extended
+grep -qx 'extended_lines=21' "$DCD/out" && ok || bad DC44r4-extended-count "$(tr '\n' ';' < "$DCD/out")"
+dc DC44r5-jira-labelled-list-without-flag 1 'fail brief longer than 6 lines' file jira "$DCD/jira-ext-labelled.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n\n**Done:**\n- Adds the section.\n- Reads the metaobject.\n\n- N/A\n' > "$DCD/jira-ext-bold-label.md"
+dc DC44r6-jira-extended-labelled-list-still-checked 1 'fail None/N/A placeholder' file jira "$DCD/jira-ext-bold-label.md" --extended
+grep -qx 'brief_lines=0' "$DCD/out" && ok || bad DC44r6-no-brief "$(tr '\n' ';' < "$DCD/out")"
 dc DC44s-jira-extended-pr-line-only 0 'extended_lines=0' file jira "$DCD/jira.md" --extended
 { cat "$DCD/jira-brief.md"; printf '\nextended: the developer wants the metaobject explained\n'; } > "$DCD/jira-ext-key.md"
 dc DC44s2-jira-extension-brief-key 1 'fail brief text in the comment' file jira "$DCD/jira-ext-key.md" --extended

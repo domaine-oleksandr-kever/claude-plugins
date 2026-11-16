@@ -171,8 +171,13 @@
 # `store=<domain> token_source=<env|toml|session>`, and one whose CLI output (stderr, or the 4.x
 # `--json` error envelope on stdout) reads as an auth rejection adds one `hint=` line naming the
 # per-store nature of the Theme Access token — or, on the session, `shopify auth login` — ahead of
-# the CLI's own tail) · 3 no engine credentials at
-# all (hints name every remedy) · 6 the write reported success but the theme does not serve the
+# the CLI's own tail; every themecli `shopify` call runs with stdin closed, SHOPIFY_FLAG_NO_INPUT=1
+# and at most FE_THEME_JSON_CLI_WAIT seconds (default 300): a device-code login in its output (an
+# expired or missing CLI session) is stopped on sight and is `error=auth_expired store=<domain>
+# token_source=<env|toml|session>` + the login hint ahead of every other verdict, and a call that
+# outlives the wait is `error=cli_timeout store=<domain> token_source=<…> seconds=<n>`; in the
+# post-push read-back either one is a `note=` line and the outcome is exit 6) · 3 no
+# engine credentials at all (hints name every remedy) · 6 the write reported success but the theme does not serve the
 # payload (read-back mismatch, or the read-back itself failed — state unconfirmed).
 set -euo pipefail
 
@@ -352,6 +357,12 @@ VERIFY=1
 VERIFY_WAIT="${FE_THEME_JSON_VERIFY_WAIT:-2}"
 case "$VERIFY_WAIT" in ''|.|*.*.*|*[!0-9.]*) VERIFY_WAIT=2 ;; esac
 VERIFY_WAITS="$VERIFY_WAIT $(awk -v w="$VERIFY_WAIT" 'BEGIN { print w * 2.5 }')"
+if [ -z "${FE_THEME_JSON_CLI_WAIT+x}" ]; then
+  _v="$(domaine_env FE_THEME_JSON_CLI_WAIT)"; [ -n "$_v" ] && FE_THEME_JSON_CLI_WAIT="$_v"
+fi
+# whole seconds: the watchdog reads $SECONDS
+CLI_WAIT="${FE_THEME_JSON_CLI_WAIT:-300}"
+case "$CLI_WAIT" in ''|*[!0-9]*) CLI_WAIT=300 ;; esac
 
 # normalize_body <file> → stdout: the comparable form of a theme file body. *.json rides
 # strip_json_comments (Shopify re-stamps its /*…*/ banner on every write, so the banner is not
@@ -778,6 +789,54 @@ cli_token_ready() {
   return 1
 }
 
+# The CLI's device-code login: an expired or missing session makes `shopify theme …` open a browser
+# and poll for minutes, then fail ("Device authorization failed: Token expired") — whatever its exit;
+# under SHOPIFY_FLAG_NO_INPUT it refuses at once ("Authorization is required to continue").
+DEVICE_LOGIN_RE='activate-with-code|device authorization|start the auth process|authorization is required to continue'
+
+# Every themecli `shopify` call: stdin closed and SHOPIFY_FLAG_NO_INPUT set (stdin alone does not stop
+# CLI 4.x opening the browser), output into files (a CLI child outliving a kill cannot hold a pipe
+# open), at most $CLI_WAIT seconds. A device-code login is stopped on sight and is error=auth_expired
+# before any other verdict; a call that outlives the wait is error=cli_timeout. While CLI_SOFT=1 (the
+# post-push read-back) either one is a note= line and a return 1, so verify_applied owns the verdict.
+CLI_SOFT=0
+cli_run() { # cli_run <out-file|-> <err-file> <shopify args…> → the CLI's exit status; exits 5 on either
+  local out="$1" err="$2" pid wd rc=0 flag lead=error
+  shift 2
+  [ "$CLI_SOFT" -eq 0 ] || lead=note
+  [ "$out" != - ] || { out="$(mktemp)"; CLEAN+=("$out"); }
+  flag="$err.timeout"; CLEAN+=("$flag")
+  SHOPIFY_FLAG_NO_INPUT=1 shopify "$@" </dev/null >"$out" 2>"$err" &
+  pid=$!
+  ( t0=$SECONDS
+    while kill -0 "$pid"; do
+      if grep -qiE "$DEVICE_LOGIN_RE" "$out" "$err" || { [ $((SECONDS - t0)) -ge "$CLI_WAIT" ] && : > "$flag"; }; then
+        pkill -TERM -P "$pid" || true; kill -TERM "$pid" || true; break
+      fi
+      sleep 1
+    done ) >/dev/null 2>&1 &
+  wd=$!
+  wait "$pid" 2>/dev/null || rc=$?
+  kill "$wd" 2>/dev/null || true; wait "$wd" 2>/dev/null || true
+  if grep -qiE "$DEVICE_LOGIN_RE" "$out" "$err" 2>/dev/null; then
+    cat "$out" >> "$err"
+    echo "$lead=auth_expired store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2
+    if [ "$CLI_TOKEN_SOURCE" = session ]; then cli_auth_hint "$err"
+    else echo "hint=the Shopify CLI started an interactive login although a Theme Access token ($CLI_TOKEN_SOURCE) was set — run \`shopify theme list --store $DOMAIN\` in a terminal to see why, or \`shopify auth login\`" >&2; fi
+    grep -iE "$DEVICE_LOGIN_RE|token expired" "$err" | grep -v 'activate-with-code' | tail -2 >&2 || true
+    [ "$CLI_SOFT" -eq 0 ] || return 1
+    exit 5
+  fi
+  if [ -f "$flag" ]; then
+    echo "$lead=cli_timeout store=$DOMAIN token_source=$CLI_TOKEN_SOURCE seconds=$CLI_WAIT (shopify $1 $2)" >&2
+    echo "hint=the Shopify CLI gave no answer within ${CLI_WAIT}s and was stopped — check the network and the CLI login (\`shopify theme list --store $DOMAIN\` in a terminal), or raise FE_THEME_JSON_CLI_WAIT; after a push, re-run \`theme-json.sh get\` before assuming either outcome" >&2
+    tail -5 "$err" >&2
+    [ "$CLI_SOFT" -eq 0 ] || return 1
+    exit 5
+  fi
+  return "$rc"
+}
+
 # A Theme Access token is minted PER STORE, so the CLI's auth rejection (a box-drawing frame around
 # "401 undefined" or "Invalid API key or access token") almost always means token-vs-store mismatch,
 # not a broken token — the one thing its raw output never says. A status code stands alone between
@@ -806,6 +865,7 @@ cli_auth_hint() { # $1 = file holding the CLI's stderr — one hint line, only w
   if [ "$CLI_TOKEN_SOURCE" = "session" ]; then
     cli_auth_rejected "$1" \
       || grep -qiE 'not logged in|log in to shopify|auth login|credentials are invalid|(failed|unable) to prompt|not authorized|(^|[[:space:]])403([[:space:]]|$)' "$1" \
+      || grep -qiE "$DEVICE_LOGIN_RE" "$1" \
       || return 0
     local why="none in SHOPIFY_CLI_THEME_TOKEN or $(toml_abs)"
     [ -z "$TOML_STORE_FOREIGN" ] || why="the password= in $(toml_src) is $TOML_STORE_FOREIGN's, so it was not sent"
@@ -845,11 +905,12 @@ prep_cli() {
 }
 
 CLI_LIST=""
-# A banner before the JSON is trimmed, not fatal (pipefail keeps the CLI's own rc); an EMPTY listing
+# A banner before the JSON is trimmed, not fatal; an EMPTY listing
 # is fatal (a silent CLI would otherwise read as "no such theme"), and so is a 4.x {"error":…} envelope.
 cli_list() {
-  local err rc=0; err="$(mktemp)"; CLEAN+=("$err")
-  CLI_LIST="$(shopify theme list --store "$DOMAIN" --json --no-color 2>"$err" | theme_list_trim)" || rc=$?
+  local out err rc=0; out="$(mktemp)"; err="$(mktemp)"; CLEAN+=("$out" "$err")
+  cli_run "$out" "$err" theme list --store "$DOMAIN" --json --no-color || rc=$?
+  CLI_LIST="$(theme_list_trim < "$out")"
   if [ "$rc" -ne 0 ] || [ -z "$CLI_LIST" ] \
      || ! printf '%s' "$CLI_LIST" | jq -e '(type == "object" and has("error")) | not' >/dev/null 2>&1; then
     cli_json_error "$CLI_LIST" "$err"
@@ -872,8 +933,8 @@ cli_get() {
   local nid tmp err
   nid="$(num_of "$THEME")"
   tmp="$(mktemp -d)"; err="$(mktemp)"; CLEAN+=("$tmp" "$err")
-  shopify theme pull --store "$DOMAIN" --theme "$nid" --path "$tmp" \
-      --only "$FILE" --nodelete --no-color >/dev/null 2>"$err" \
+  cli_run - "$err" theme pull --store "$DOMAIN" --theme "$nid" --path "$tmp" \
+      --only "$FILE" --nodelete --no-color \
     || { echo "error=cli_pull_failed theme=$nid store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2; cli_auth_hint "$err"; tail -5 "$err" >&2; exit 5; }
   [ -f "$tmp/$FILE" ] || { echo "error=file_not_found file=$FILE theme=$nid (engine=themecli)" >&2; exit 5; }
   emit_file "$tmp/$FILE"
@@ -882,12 +943,14 @@ cli_get() {
 # read-back reader for verify_applied — the `cli_get` pull mechanics into a private temp dir,
 # minus the emit path (the body goes to a file, never to stdout)
 cli_read_back() { # $1 = dest file
-  local nid d e
+  local nid d e rc=0
   nid="$(num_of "$THEME")"
   d="$(mktemp -d)"; e="$(mktemp)"; CLEAN+=("$d" "$e")
-  shopify theme pull --store "$DOMAIN" --theme "$nid" --path "$d" \
-      --only "$FILE" --nodelete --no-color >/dev/null 2>"$e" \
-    || { tail -3 "$e" >&2; return 1; }
+  CLI_SOFT=1
+  cli_run - "$e" theme pull --store "$DOMAIN" --theme "$nid" --path "$d" \
+      --only "$FILE" --nodelete --no-color || rc=$?
+  CLI_SOFT=0
+  [ "$rc" -eq 0 ] || { tail -3 "$e" >&2; return 1; }
   [ -f "$d/$FILE" ] || return 1
   cat "$d/$FILE" > "$1"
 }
@@ -928,7 +991,7 @@ cli_upload_rejection() { # $1 = the push's stdout, $2 = its stderr file → the 
 }
 
 cli_set() {
-  local nid role name tmp err out verified="skipped" prc=0 why
+  local nid role name tmp err out outf verified="skipped" prc=0 why
   nid="$(num_of "$THEME")"
   cli_list
   [ -n "$(theme_list_field "$CLI_LIST" "$nid" id)" ] || { echo "error=theme_not_found theme=$nid (engine=themecli)" >&2; exit 5; }
@@ -937,11 +1000,12 @@ cli_set() {
   # role must not clear the target
   [ -n "$role" ] || { echo "error=live_role_unreadable theme=$nid (engine=themecli)" >&2; exit 5; }
   if role_is_live "$role"; then live_refuse "$name" "$role"; fi
-  tmp="$(mktemp -d)"; err="$(mktemp)"; CLEAN+=("$tmp" "$err")
+  tmp="$(mktemp -d)"; err="$(mktemp)"; outf="$(mktemp)"; CLEAN+=("$tmp" "$err" "$outf")
   mkdir -p "$tmp/$(dirname "$FILE")"
   cp "$FROM" "$tmp/$FILE"
-  out="$(shopify theme push --store "$DOMAIN" --theme "$nid" --path "$tmp" \
-      --only "$FILE" --nodelete --json --no-color 2>"$err")" || prc=$?
+  cli_run "$outf" "$err" theme push --store "$DOMAIN" --theme "$nid" --path "$tmp" \
+      --only "$FILE" --nodelete --json --no-color || prc=$?
+  out="$(cat "$outf")"
   if why="$(cli_upload_rejection "$out" "$err")"; then
     echo "error=upload_rejected theme=$nid file=$FILE reason=$why" >&2
     echo "hint=Shopify's validation refused the file, so nothing was read back and the theme's state is unconfirmed — fix the payload, and re-run \`theme-json.sh get --theme $nid --file $FILE\` before assuming either outcome" >&2
@@ -1192,9 +1256,9 @@ cli_where_used() {
   fi
   WU_DOMAIN="$DOMAIN"; WU_ENGINE=themecli
   WU_DIR="$(mktemp -d)"; err="$(mktemp)"; CLEAN+=("$WU_DIR" "$err")
-  shopify theme pull --store "$DOMAIN" --theme "$WU_NID" --path "$WU_DIR" \
+  cli_run - "$err" theme pull --store "$DOMAIN" --theme "$WU_NID" --path "$WU_DIR" \
       --only 'templates/*.json' --only 'templates/**/*.json' --only 'sections/*.json' \
-      --nodelete --no-color >/dev/null 2>"$err" \
+      --nodelete --no-color \
     || { echo "error=cli_pull_failed theme=$WU_NID store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2; cli_auth_hint "$err"; tail -5 "$err" >&2; exit 5; }
   wu_scan
 }

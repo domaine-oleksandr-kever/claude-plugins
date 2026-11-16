@@ -322,7 +322,7 @@ domaine_env() {
   # Every other switch — the verify gates above all — comes from the environment or the global
   # file, default-deny.
   case "$1" in
-    FE_PROFILE|FE_GQL_PROBE_CACHE|FE_CPT_THROTTLE_WAITS|FE_CPT_OVERLAY_VERIFY_WAIT|FE_THEME_JSON_VERIFY_WAIT|SHOPIFY_ADMIN_GQL_QUIET)
+    FE_PROFILE|FE_GQL_PROBE_CACHE|FE_CPT_THROTTLE_WAITS|FE_CPT_OVERLAY_VERIFY_WAIT|FE_THEME_JSON_VERIFY_WAIT|FE_THEME_JSON_CLI_WAIT|SHOPIFY_ADMIN_GQL_QUIET)
       while :; do
         if [ -f "$d/.claude/domaine.env" ]; then pf="$d/.claude/domaine.env"; break; fi
         [ "$d" = "/" ] && break

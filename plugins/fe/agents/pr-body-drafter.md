@@ -99,8 +99,8 @@ GFM table (a header row, a `| --- |` separator row, one row per item), its rows 
 no `table:` → no table. `extended:` → after the brief (and the table, if any) one blank line, then
 exactly what `extended:` asks for — paragraphs or bullets, no headings, no length cap; the brief
 stays the first block after the PR line and keeps its rules. With `brief: no`, the extension follows
-line 1 (and the table) directly after one blank line, and its first block is a paragraph with
-no bullet line — the check reads a first block holding a bullet as the brief. No `extended:` → nothing past the
+line 1 (and the table) directly after one blank line, and its first block opens with a
+non-bullet line (a paragraph, a bare label like `Done:`) — the check reads a first block opening with a bullet as the brief. No `extended:` → nothing past the
 brief and the table. **Never** a preview theme link, a theme id or an editor URL — the preview theme is
 deleted after merge and the link rots; never brief or notes text verbatim, never AI attribution.
 `Write` it, run `node <fe root>/scripts/drafter-check.cjs file jira <path>` (with `table:`, add
