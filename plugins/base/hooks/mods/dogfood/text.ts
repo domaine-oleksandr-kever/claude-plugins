@@ -388,19 +388,20 @@ export function priorErrors(json: string | null, sid: string, reportMs: number):
 
 /**
  * A refusal the script printed on purpose, with no crash signature: its `error=` lines all refusals, or, with
- * none, a `<stem>: <why>` line (a base script's die). The script did its job, nothing to report.
+ * none, a negative verdict line (`result=fail` of a checker, `result=invalid` of a validator) or a `<stem>: <why>`
+ * line (a base script's die). The script did its job, nothing to report.
  */
 export function designedRefusal(text: string, script: string): boolean {
   if (crashed(text)) return false
   const reasons = errorReasons(text)
   if (reasons.length) return reasons.every(r => REFUSAL.test(r))
-  return new RegExp(`^${esc(script.replace(/\.[a-z]+$/, ''))}: `, 'm').test(text)
+  return /^result=(?:fail|invalid)\b/m.test(text) || new RegExp(`^${esc(script.replace(/\.[a-z]+$/, ''))}: `, 'm').test(text)
 }
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-/** A crash signature in the output: `Error` (an exception, a node stack) outside the host's `Exit code N` line; never a refusal. */
-export const crashed = (text: string): boolean => text.split('\n').some(l => /\bError\b/.test(l) && !EXIT_LINE.test(l))
+/** A crash signature in the output: `Error`, `TypeError`, … (an exception, a node stack) outside the host's `Exit code N` line; never a refusal. */
+export const crashed = (text: string): boolean => text.split('\n').some(l => /\b(?:[A-Z][a-z]*)?Error\b/.test(l) && !EXIT_LINE.test(l))
 
 /**
  * A crash the script's own trace names: `Error` (`TypeError`, …) with a stack frame `<script>:12`, or a shell's `<script>: line 12:`.

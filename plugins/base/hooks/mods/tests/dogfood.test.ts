@@ -594,6 +594,20 @@ describe('nudge and stop', () => {
     expect(armed(w)).toBe('shopify-validate.cjs')
   })
 
+  t('a checker verdict `result=fail` with exit 1 is designed: no nudge, no event, no block; with a stack it is a failure', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    const cmd = 'node /home/dev/.claude/plugins/cache/domaine/fe/0.20.0/scripts/drafter-check.cjs file stt /t/stt.md --project-rules /t/rules.md'
+    w.bash = () => ({ isError: true, result: 'Exit code 1\nresult=fail kind=stt\nlines=9\nfail heading in item 2\nfail theme id in item 1' })
+    await start($)
+    expect((await bash($, cmd)).context ?? []).toEqual([])
+    expect(await eventsOf($, 'defect')).toEqual([])
+    expect(armed(w)).toBeNull()
+    w.bash = () => ({ isError: true, result: 'Exit code 1\nresult=fail kind=stt\nTypeError: Cannot read properties of undefined\n    at report (/t/drafter-check.cjs:96:3)' })
+    expect((await bash($, cmd)).context).toEqual([NUDGE])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: drafter-check.cjs'])
+    expect(armed(w)).toBe('drafter-check.cjs')
+  })
+
   t('a designed refusal (base die, fe error= line) gets no nudge, no event, no block', async ($, on) => {
     const { w } = world(on, { env: ON })
     w.bash = cmd => cmd.includes('qa-stores')
@@ -931,6 +945,12 @@ describe('pure parts', () => {
     expect(designedRefusal('see shopify-validate: nope', 'shopify-validate.cjs')).toBe(false)
     expect(designedRefusal('aXb: nope', 'a.b.cjs')).toBe(false)
     expect(designedRefusal('a.b: nope', 'a.b.cjs')).toBe(true)
+    expect(designedRefusal('Exit code 1\nresult=fail kind=stt\nlines=9\nfail heading in item 2', 'drafter-check.cjs')).toBe(true)
+    expect(designedRefusal('Exit code 1\nresult=invalid\nOverall Status: INVALID', 'shopify-validate.cjs')).toBe(true)
+    expect(designedRefusal('result=fail kind=stt\nTypeError: x is undefined\n    at report (drafter-check.cjs:96:3)', 'drafter-check.cjs')).toBe(false)
+    expect(designedRefusal('result=unavailable', 'shopify-validate.cjs')).toBe(false)
+    expect(designedRefusal('see result=fail', 'drafter-check.cjs')).toBe(false)
+    expect(failureLine('result=fail kind=stt\nfail heading in item 2\nfail error= in brief')).toBe(false)
   })
 
   test('the two classes: every refusal reason is silent, every failure reason is a failure line', () => {
