@@ -1001,7 +1001,9 @@ cli_set() {
   [ -n "$role" ] || { echo "error=live_role_unreadable theme=$nid (engine=themecli)" >&2; exit 5; }
   if role_is_live "$role"; then live_refuse "$name" "$role"; fi
   tmp="$(mktemp -d)"; err="$(mktemp)"; outf="$(mktemp)"; CLEAN+=("$tmp" "$err" "$outf")
-  mkdir -p "$tmp/$(dirname "$FILE")"
+  # push refuses a --path without these dirs under no-input (4.x wants config/layout/templates, 3.x
+  # also sections); left empty, --only + --nodelete keep the push to the one file
+  mkdir -p "$tmp/config" "$tmp/layout" "$tmp/sections" "$tmp/templates" "$tmp/$(dirname "$FILE")"
   cp "$FROM" "$tmp/$FILE"
   cli_run "$outf" "$err" theme push --store "$DOMAIN" --theme "$nid" --path "$tmp" \
       --only "$FILE" --nodelete --json --no-color || prc=$?

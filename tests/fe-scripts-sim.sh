@@ -245,7 +245,9 @@ fi
 # (list, push) are an expired session's device-code login — the link line on stdout, the failure on
 # stderr — ending in exit 0/1; `noinput` (list) is that session under SHOPIFY_FLAG_NO_INPUT (an
 # immediate refusal, exit 1); `devicehang` (list) prints the link and blocks, `hang` (list, pull)
-# blocks silently. TJ_STDIN_LOG receives whatever the CLI could read on stdin.
+# blocks silently. TJ_STDIN_LOG receives whatever the CLI could read on stdin. Like the real CLI under
+# SHOPIFY_FLAG_NO_INPUT, push refuses a --path that is not theme-shaped (config, layout, sections,
+# templates: the 3.x and 4.x sets together) and pull one that is neither empty nor theme-shaped.
 [ -z "${TJ_STDIN_LOG:-}" ] || cat > "$TJ_STDIN_LOG"
 TJ_DEV_LINK='{"level":"info","message":"Opened link to start the auth process: https://accounts.shopify.com/activate-with-code?device_code%5Buser_code%5D=FAKE-CODE"}'
 path=""; only=""; prev=""
@@ -253,6 +255,11 @@ for a in "$@"; do
   case "$prev" in --path) path="$a" ;; --only) only="$a" ;; esac
   prev="$a"
 done
+tj_theme_dir() { local d; for d in config layout sections templates; do [ -d "${path:-.}/$d" ] || return 1; done; }
+tj_not_theme_dir() {
+  echo "It doesn't seem like you're running this command in a theme directory." >&2
+  [ -z "${SHOPIFY_FLAG_NO_INPUT:-}" ] || { echo 'This command must run from a theme directory when user input is unavailable.' >&2; exit 1; }
+}
 case "$*" in
   *"theme list"*)
     case "${TJ_LIST_FAIL:-}" in
@@ -278,6 +285,7 @@ case "$*" in
     if [ -n "${TJ_LIST_JSON:-}" ]; then printf '%s\n' "$TJ_LIST_JSON"
     else printf '[{"id":2,"name":"Dev","role":"development"}]\n'; fi ;;
   *"theme push"*)
+    tj_theme_dir || tj_not_theme_dir
     [ "${TJ_PUSH_FAIL:-}" = 401 ] && { printf '%s\n' '│  401 undefined  │' >&2; exit 1; }
     case "${TJ_PUSH_FAIL:-}" in device0|device1)
       printf '%s\n' "$TJ_DEV_LINK" >&2; echo 'Device authorization failed: Token expired. Please try again.' >&2
@@ -289,6 +297,7 @@ case "$*" in
     printf '%s\n' "$pj"
     [ -z "${TJ_PUSH_RC:-}" ] || exit "$TJ_PUSH_RC" ;;
   *"theme pull"*)
+    [ -z "$(ls -A "${path:-.}")" ] || tj_theme_dir || tj_not_theme_dir
     [ "${TJ_PULL_FAIL:-}" = 401 ] && { printf '%s\n' '│  401 undefined  │' >&2; exit 1; }
     [ "${TJ_PULL_FAIL:-}" = hang ] && { sleep 20; exit 0; }
     [ -n "${TJ_PULL_FAIL:-}" ] && { echo "Error: could not pull (503)" >&2; exit 1; }
