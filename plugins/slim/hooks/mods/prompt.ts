@@ -6,9 +6,9 @@
 import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimEvent } from '../../types'
-import { eventText, pushEvent } from './events.ts'
-import { buildPromptDropRun, buildPromptRun, parsePrompt, toastMs } from './node-hook.ts'
-import type { Prompted } from './node-hook.ts'
+import { eventText, pushEvent } from './events'
+import { buildPromptDropRun, buildPromptRun, parsePrompt, toastMs } from './node-hook'
+import type { Prompted } from './node-hook'
 
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
 
@@ -29,7 +29,7 @@ async function dropSpills($: EngineInterface, root: string, rw: Prompted): Promi
 }
 
 export function registerPrompt(on: On): void {
-  on('prompt.submit', { origin: { kind: ['composer', 'bridge'] } }, async ($, e, next) => {
+  on('prompt.submit', { origin: { kind: /^(?:composer|bridge)$/ } }, async ($, e, next) => {
     if (!due(e.text)) return next(e)
     const t0 = await $.clock.now().catch(() => 0)
     let rw: Prompted | null = null

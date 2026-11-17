@@ -5,9 +5,9 @@
 import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimChannel, SlimEvent } from '../../types'
-import { GATES, attachmentEligible, attachmentPath, attachmentShape, candidate, channelOf, floor, guardOf, viewOf } from './channels.ts'
-import type { Pre } from './channels.ts'
-import { agentPrefix, eventText, pushEvent } from './events.ts'
+import { GATES, attachmentEligible, attachmentPath, attachmentShape, candidate, channelOf, floor, guardOf, viewOf } from './channels'
+import type { Pre } from './channels'
+import { agentPrefix, eventText, pushEvent } from './events'
 import {
   alreadySlimIn,
   alreadySlimTexts,
@@ -25,7 +25,7 @@ import {
   textKey,
   toastMs,
   utf8Bytes,
-} from './node-hook.ts'
+} from './node-hook'
 
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
 

@@ -6,8 +6,8 @@
 // A model's first Read of a big image (a raw screenshot) is denied with a pointer to view, which resizes
 // it; the next Read of that path passes, and so does the first one after a view that could not resize it.
 import type { EngineInterface, On } from 'claude-code'
-import { spillAccess, spillKind } from './channels.ts'
-import { buildAccessRun, debugLevel, textKey } from './node-hook.ts'
+import { spillAccess, spillKind } from './channels'
+import { buildAccessRun, debugLevel, textKey } from './node-hook'
 
 /** A spill at or under this many bytes is read whole without a word: the read channel's own gate. */
 export const SPILL_INLINE = 32768

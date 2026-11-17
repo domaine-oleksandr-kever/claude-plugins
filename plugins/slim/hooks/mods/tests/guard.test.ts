@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { IMAGE_READ_MAX, SPILL_INLINE, denyText, imageDenyText, imageReadMax } from '../guard.ts'
-import { attachmentEligible, attachmentPath, bashVia, guardOf, spillAccess, spillKind } from '../channels.ts'
+import { IMAGE_READ_MAX, SPILL_INLINE, denyText, imageDenyText, imageReadMax } from '../guard'
+import { attachmentEligible, attachmentPath, bashVia, guardOf, spillAccess, spillKind } from '../channels'
 
 const ORIG = '/tmp/slim-mcp-0123456789abcdef.json'
 const ROWS = '/tmp/slim-crush-0123456789abcdef.json'

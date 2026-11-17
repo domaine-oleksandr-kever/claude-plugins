@@ -6,10 +6,10 @@
 import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimEvent } from '../../types'
-import { agentPrefix, pushEvent, viewText } from './events.ts'
-import { passImage } from './guard.ts'
-import { buildRecordRun, buildViewRun, commandSource, parseView, utf8Bytes } from './node-hook.ts'
-import type { Viewed } from './node-hook.ts'
+import { agentPrefix, pushEvent, viewText } from './events'
+import { passImage } from './guard'
+import { buildRecordRun, buildViewRun, commandSource, parseView, utf8Bytes } from './node-hook'
+import type { Viewed } from './node-hook'
 
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
 

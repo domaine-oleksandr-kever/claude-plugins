@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { LINT_CMD, LINT_GATE, candidate, viewOf } from '../channels.ts'
+import { LINT_CMD, LINT_GATE, candidate, viewOf } from '../channels'
 
 describe('lint admission', () => {
   const bash = (stdout: string, command: string) =>

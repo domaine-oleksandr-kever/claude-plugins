@@ -1,6 +1,9 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { FILE_BYTES, FILE_LINES, fileLine, keep, logDir, seedLines } from '../eventlog.ts'
+import { FILE_BYTES, FILE_LINES, fileLine, keep, logDir, seedLines } from '../eventlog'
+
+/** The test runtime has it; the mods lib declares no timer globals. A real wait, since the world's clock is mocked. */
+declare const setTimeout: (f: (...args: unknown[]) => void, ms: number) => unknown
 
 const VIEW = 'mcp__slim__view'
 const NOW = 1_760_000_000_000
@@ -37,7 +40,7 @@ function world(on: On, session: string | (() => string), o: Opts = {}) {
     return { deny: `ENOENT: ${e.path}` } as any
   })
   on('fs.write', async (_$, e) => {
-    if (o.writeMs) await new Promise(r => setTimeout(r, o.writeMs))
+    if (o.writeMs) { const ms = o.writeMs; await new Promise(r => setTimeout(r, ms)) }
     w.writes.push(e.path)
     if (o.writeFails) return { deny: o.writeFails } as any
     w.files[e.path] = e.text

@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { due } from '../prompt.ts'
-import { parsePrompt, textKey } from '../node-hook.ts'
+import { due } from '../prompt'
+import { parsePrompt, textKey } from '../node-hook'
 
 const ok = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
 const PASTE = `Why does this fail?\n\n${JSON.stringify({ issues: Array.from({ length: 400 }, (_, i) => ({ key: `ACME-${i}`, status: 'open' })) })}\n\nThanks.`
@@ -108,7 +108,7 @@ describe('P1 the rewrite', () => {
     const r = await submit($, PASTE)
     await w.clock.settle()
     expect(r.drop).toBe('raced')
-    expect(JSON.parse((await $.command.run({ command: 'race-saw', args: '' } as any)).text)).toEqual([PASTE])
+    expect(JSON.parse((await $.command.run({ command: 'race-saw', args: '' } as any)).text!)).toEqual([PASTE])
     expect(w.seen).toEqual([])
     expect(w.toasts).toEqual([])
     expect(await events($)).toEqual([])

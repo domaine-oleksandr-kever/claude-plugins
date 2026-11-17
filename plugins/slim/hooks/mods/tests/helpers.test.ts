@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { SlimEvent } from '../../../types'
-import type { View } from '../channels.ts'
-import { GATES, LIST_GATE, LOG_GATE, attachmentShape, candidate, channelOf, floor, guardOf, isSourceJson, structured, viewOf } from '../channels.ts'
-import { EVENT_CAP, agentPrefix, eventText, fmtSize, fmtTokens, groupSuffix, lookupText, pctSaved, pushEvent, rowLine, toolName } from '../events.ts'
-import { HEADER, cutBytes, parseReply, quoted, resultText, verified } from '../lookup.ts'
+import type { View } from '../channels'
+import { GATES, LIST_GATE, LOG_GATE, attachmentShape, candidate, channelOf, floor, guardOf, isSourceJson, structured, viewOf } from '../channels'
+import { EVENT_CAP, agentPrefix, eventText, fmtSize, fmtTokens, groupSuffix, lookupText, pctSaved, pushEvent, rowLine, toolName } from '../events'
+import { HEADER, cutBytes, parseReply, quoted, resultText, verified } from '../lookup'
 import {
   ENGINES,
   alreadySlimIn,
@@ -23,7 +23,7 @@ import {
   stubBytes,
   texts,
   toastMs,
-} from '../node-hook.ts'
+} from '../node-hook'
 
 const bytes = (s: string) => new TextEncoder().encode(s).length
 const commas = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')

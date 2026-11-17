@@ -3,7 +3,7 @@
 import { atom, memberOf, read } from 'claude-code'
 import type { On } from 'claude-code'
 import type { SlimRow } from '../../types'
-import { groupSuffix, pctSaved, rowLine } from './events.ts'
+import { groupSuffix, pctSaved, rowLine } from './events'
 
 const rows = atom({ plugin: 'slim', key: 'rows' } as const, null as SlimRow | null)
 

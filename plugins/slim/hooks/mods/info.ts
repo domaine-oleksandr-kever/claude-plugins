@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimChannel, SlimEvent } from '../../types'
-import { pushEvent } from './events.ts'
+import { pushEvent } from './events'
 
 type $ = EngineInterface
 

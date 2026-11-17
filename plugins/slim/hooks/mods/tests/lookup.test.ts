@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BAD_ARGS, HEADER, LOOKUP_DESC, LOOKUP_SCHEMA, NO_QUESTION, NO_VERDICT_HINT, NO_WEBFETCH_HINT, SYS, urlFailureText, verified, webFetchPrompt } from '../lookup.ts'
-import { VIEW_DESC, VIEW_SCHEMA } from '../view.ts'
+import { BAD_ARGS, HEADER, LOOKUP_DESC, LOOKUP_SCHEMA, NO_QUESTION, NO_VERDICT_HINT, NO_WEBFETCH_HINT, SYS, urlFailureText, verified, webFetchPrompt } from '../lookup'
+import { VIEW_DESC, VIEW_SCHEMA } from '../view'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; timeoutMs?: number } }
 const LOOKUP = 'mcp__slim__lookup'

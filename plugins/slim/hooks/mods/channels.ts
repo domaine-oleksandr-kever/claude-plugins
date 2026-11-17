@@ -1,7 +1,7 @@
 // Pure: which channel a tool's result belongs to, what slim reads of it, and whether it is worth a
 // core run. The tool name picks the channel; the decision to compress is the core's, by content.
 import type { SlimChannel } from '../../types'
-import { PLAIN_MIN, utf8Bytes } from './node-hook.ts'
+import { PLAIN_MIN, utf8Bytes } from './node-hook'
 
 /** Bytes over which a channel's result is a candidate; 0 = SLIM_PLAIN_BYTES. scripts/delivery/channels.cjs holds the same table. */
 export const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, agent: 0, attachment: 32768 } as const

@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { denyText } from '../intake.ts'
-import { attachmentEligible, tabular } from '../channels.ts'
+import { denyText } from '../intake'
+import { attachmentEligible, tabular } from '../channels'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; env?: Record<string, string>; timeoutMs?: number } }
 type Below = Record<string, unknown>
@@ -431,7 +431,7 @@ describe('K13b another plugin\'s tool call', () => {
   test('a 120 KB Bash JSON another plugin asked for comes back untouched: no run, no row', { plugins: [SIBLING, PEEK] }, async ($, on) => {
     const big = json(120_000)
     const w = world(on, bash(big))
-    const out = JSON.parse((await $.command.run({ command: 'sibling-bash' } as any)).text)
+    const out = JSON.parse((await $.command.run({ command: 'sibling-bash' } as any)).text!)
     expect(out).toEqual(bash(big).result)
     expect(w.runs.length + w.other.length).toBe(0)
     expect((await peek($, w.calls[0].tool_use_id)).row).toBeNull()

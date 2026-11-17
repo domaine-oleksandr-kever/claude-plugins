@@ -3,8 +3,8 @@
 // the list through slim's own state.set hook, so SLIM_EVENT_LOG=0, which stops the list, stops the file.
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimEvent } from '../../types'
-import { agentLabel } from './events.ts'
-import { utf8Bytes } from './node-hook.ts'
+import { agentLabel } from './events'
+import { utf8Bytes } from './node-hook'
 
 type $ = EngineInterface
 
@@ -132,7 +132,7 @@ export function registerEventLog(on: On): void {
   // Every slim.events write appends one event (pushEvent), so the newest is the one to log.
   on('state.set', { plugin: 'slim', key: 'events' }, async ($, e, next) => {
     const r = await next(e)
-    if ('value' in r && r.value.isSet) {
+    if ('value' in r && r.value?.isSet) {
       const list = e.value as readonly SlimEvent[] | null
       const ev = list?.[list.length - 1]
       if (ev) await logLine($, ev)

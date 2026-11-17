@@ -6,9 +6,9 @@
 import { atom, update } from 'claude-code'
 import type { EngineInterface, ModelUsage, On } from 'claude-code'
 import type { SlimEvent } from '../../types'
-import { agentPrefix, lookupText, pushEvent } from './events.ts'
-import { buildDistillRun, buildRecordRun, commandSource, parseDistill, utf8Bytes } from './node-hook.ts'
-import { VIEW_DESC, VIEW_SCHEMA, mediaName } from './view.ts'
+import { agentPrefix, lookupText, pushEvent } from './events'
+import { buildDistillRun, buildRecordRun, commandSource, parseDistill, utf8Bytes } from './node-hook'
+import { VIEW_DESC, VIEW_SCHEMA, mediaName } from './view'
 
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
 

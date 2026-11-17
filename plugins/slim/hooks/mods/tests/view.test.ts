@@ -1,8 +1,8 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BAD_ARGS, DENIED_WRITE, INLINE, NO_VERDICT_WRITE, PLACEHOLDER, VIEW_DESC, noUrlText, headOf, mediaName, mediaProbe, replyText, scratchProbe } from '../view.ts'
-import { viewText } from '../events.ts'
-import { textKey } from '../node-hook.ts'
+import { BAD_ARGS, DENIED_WRITE, INLINE, NO_VERDICT_WRITE, PLACEHOLDER, VIEW_DESC, noUrlText, headOf, mediaName, mediaProbe, replyText, scratchProbe } from '../view'
+import { viewText } from '../events'
+import { textKey } from '../node-hook'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; timeoutMs?: number } }
 const VIEW = 'mcp__slim__view'
