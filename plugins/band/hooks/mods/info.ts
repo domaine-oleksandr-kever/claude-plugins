@@ -2,7 +2,7 @@
 // option is on; band's own file lines and /band-debug read the version. Also registers band's slash commands,
 // again after a /clear.
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
-import { CHECKLIST_COMMAND, DEBUG_COMMAND, LOG_COMMAND } from './events.ts'
+import { CHECKLIST_COMMAND, DEBUG_COMMAND, LOG_COMMAND } from './events'
 
 type $ = EngineInterface
 

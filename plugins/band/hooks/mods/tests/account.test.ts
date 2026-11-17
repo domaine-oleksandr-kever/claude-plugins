@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
-import { CLEAR_RESEED_MS } from '../lib.ts'
-import { MIN, T0, ok, peek, start, test, world } from './world.tsx'
+import { CLEAR_RESEED_MS } from '../lib'
+import { MIN, T0, ok, peek, start, test, world } from './world'
 
 const HOME = '/Users/dev'
 const BEARER = { handle: 'h1', kind: 'bearer' as const }

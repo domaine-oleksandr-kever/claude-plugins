@@ -1,8 +1,8 @@
 import { describe, expect, mock } from 'claude-code/testing'
-import type { On } from 'claude-code'
-import type { BandEvent } from '../../types'
-import { EVENT_CAP, PREFIX_COLS, TEXT_LOG_ROWS, anyEvent, fmtK, hhmm, kindCell, logRow, merged, newestFitting, pluginCell, pushEvent, take, textRows } from '../events.ts'
-import { SNAP, baseState, sibBase, sibSlim, teamState, test } from './world.tsx'
+import type { On, RenderSurface } from 'claude-code'
+import type { BandEvent } from '../../../types'
+import { EVENT_CAP, PREFIX_COLS, TEXT_LOG_ROWS, anyEvent, fmtK, hhmm, kindCell, logRow, merged, newestFitting, pluginCell, pushEvent, take, textRows } from '../events'
+import { SNAP, baseState, sibBase, sibSlim, teamState, test } from './world'
 
 const NOW = new Date(2027, 0, 15, 9, 5).getTime()
 const PANE = 'band-log'
@@ -21,7 +21,7 @@ function world(on: On, env: Record<string, string> = {}) {
     opens: [] as unknown[],
     closes: [] as unknown[],
     toasts: [] as string[],
-    surfaces: ['terminal'] as string[],
+    surfaces: ['terminal'] as RenderSurface[],
     clock: mock.clock(on, { now: NOW }),
   }
   mock.store(on)

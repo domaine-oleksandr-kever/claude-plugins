@@ -468,7 +468,7 @@ export const MODEL_ALIASES = ['fable', 'opus', 'sonnet', 'haiku'] as const
 
 /** `claude-haiku-5-5` → `haiku`, `claude-opus-5-5[1m]` → `opus`: the family of a model id. */
 export function modelFamily(id: string): string {
-  return (shortModel(id) as string).split('-')[0]
+  return (shortModel(id) as string).split('-')[0]!
 }
 
 /** The mark after the model id on the terminal: the segment is the picker's button. */
@@ -493,7 +493,7 @@ export function modelOptions(current: string | null, hidden: readonly string[] =
   const taken = new Set<string>()
   return [...own, ...aliases].map(o => {
     const letter = o.label[0]
-    if (!/^[a-z]$/.test(letter) || taken.has(letter)) return o
+    if (letter === undefined || !/^[a-z]$/.test(letter) || taken.has(letter)) return o
     taken.add(letter)
     return { ...o, hotkey: letter }
   })
@@ -686,7 +686,7 @@ export function planName(plan: string): string {
   return plan
     .split('_')
     .filter(Boolean)
-    .map(w => w[0].toUpperCase() + w.slice(1))
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ')
 }
 

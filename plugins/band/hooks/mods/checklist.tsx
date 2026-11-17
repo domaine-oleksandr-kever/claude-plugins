@@ -4,8 +4,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { Checklist, ChecklistMark } from '../../types'
-import { CHECKLIST_COMMAND, CHECKLIST_PANE } from './events.ts'
-import { toChecklist } from './lib.ts'
+import { CHECKLIST_COMMAND, CHECKLIST_PANE } from './events'
+import { toChecklist } from './lib'
 
 const paneShown = atom({ plugin: 'band', key: 'paneShown' } as const, false)
 const baseProgress = atom({ plugin: 'base', key: 'progress' } as const, null)

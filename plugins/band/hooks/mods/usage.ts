@@ -4,11 +4,11 @@
 // Nothing here draws; the band reads these atoms.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Timer } from 'claude-code'
-import type { BandEvent, BandEventKind, BandRate, BandUsage } from '../../types'
-import { DEBUG_COMMAND, capLines, fileLine, fmtK, logDir, pushEvent, seedLines } from './events.ts'
-import { CACHE_INIT, CLEAR_RESEED_MS, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, endpointRates, fillHalved, keepCtx, mergeRates, modelFamily, oneHourCacheTokens, rateCard, seedsTtl, toRates, toUsage, ttlMsOf } from './lib.ts'
-import { lastRender, turn } from './band.tsx'
-import { accountDebug } from './account.ts'
+import type { BandCache, BandEvent, BandEventKind, BandRate, BandUsage } from '../../types'
+import { DEBUG_COMMAND, capLines, fileLine, fmtK, logDir, pushEvent, seedLines } from './events'
+import { CACHE_INIT, CLEAR_RESEED_MS, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, endpointRates, fillHalved, keepCtx, mergeRates, modelFamily, oneHourCacheTokens, rateCard, seedsTtl, toRates, toUsage, ttlMsOf } from './lib'
+import { lastRender, turn } from './band'
+import { accountDebug } from './account'
 
 const TICK_MS = 30_000
 const ALARM_TOAST_MS = 8000
@@ -156,7 +156,7 @@ async function syncSettingsModel($: $): Promise<void> {
 /** The family a `/model` answer names: ``Set model to `Opus 5.5` (1M context) and saved …`` → `opus` (the name bare or quoted); null for any other text. */
 function answeredFamily(text: string | undefined): string | null {
   const hit = /^Set model to\s+[`'"]?([A-Za-z]+)/i.exec(text ?? '')
-  return hit ? hit[1].toLowerCase() : null
+  return hit?.[1]?.toLowerCase() ?? null
 }
 
 /**
@@ -317,7 +317,7 @@ async function fetchLimits($: $): Promise<void> {
     endpoint = toRates(endpointRates(body))
     attempt = { at, ok: true, status: res.status }
   } catch (err) {
-    attempt = { at, ok: false, error: (err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 200) }
+    attempt = { at, ok: false, error: (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 200) }
     return
   }
   await writeUsage($).catch(() => undefined)
@@ -419,14 +419,14 @@ async function isBilled($: $): Promise<boolean> {
  */
 async function adoptSubscriptionTtl($: $, rates: readonly BandRate[]): Promise<void> {
   if (rates.length === 0) return
-  await update($, cache, c =>
+  await update($, cache, (c): BandCache =>
     c.ttlSource === 'default' || c.ttlSource === 'store' ? { ...c, ttlMs: HOUR_MS, ttlSource: 'subscription' } : c,
   )
 }
 
 /** Adopts the 1 h TTL a subagent's cache writes showed; a billed session remembers it for the next billed one. */
 async function learnHourTtl($: $): Promise<void> {
-  await update($, cache, c => ({ ...c, ttlMs: HOUR_MS, ttlSource: 'agent' }))
+  await update($, cache, (c): BandCache => ({ ...c, ttlMs: HOUR_MS, ttlSource: 'agent' }))
   if (billed) await $.store.set(STORE_TTL, HOUR_MS)
 }
 
@@ -453,7 +453,7 @@ async function seed($: $, reloaded: boolean, forcedTtl: number | null): Promise<
       } catch {}
     }
     const ttlMs = forcedTtl ?? learned ?? (billed ? CACHE_INIT.ttlMs : HOUR_MS)
-    const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
+    const ttlSource: BandCache['ttlSource'] = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
     await update($, cache, c => ({ ...c, ttlMs, ttlSource })).catch(() => undefined)
   }
   let m = await sessionModel($)

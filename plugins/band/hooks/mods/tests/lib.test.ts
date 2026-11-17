@@ -58,8 +58,8 @@ import {
   splitLabel,
   toChecklist,
   toRates,
-} from '../lib.ts'
-import type { BandSegs } from '../lib.ts'
+} from '../lib'
+import type { BandSegs } from '../lib'
 
 const MIN = 60_000
 const HOUR = 60 * MIN

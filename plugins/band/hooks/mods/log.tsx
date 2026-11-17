@@ -3,7 +3,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BandEvent, ForeignEvent, LogLine } from '../../types'
-import { LOG_COMMAND, LOG_PANE, PREFIX_COLS, TEXT_LOG_ROWS, hhmm, kindCell, logDir, logRow, merged, newestFitting, pluginCell } from './events.ts'
+import { LOG_COMMAND, LOG_PANE, PREFIX_COLS, TEXT_LOG_ROWS, hhmm, kindCell, logDir, logRow, merged, newestFitting, pluginCell } from './events'
 
 const events = atom({ plugin: 'band', key: 'events' } as const, [] as BandEvent[])
 const baseEvents = atom({ plugin: 'base', key: 'events' } as const, [] as ForeignEvent[])

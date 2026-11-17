@@ -1,7 +1,7 @@
 import { describe, expect } from 'claude-code/testing'
-import { CRIT, cells, glyphText } from '../lib.ts'
-import { KEPT, MIN, SNAP, SURFACES, T0, TASK, baseState, logged, mainTurn, measure, peek, peekCache, resumed, sibBase, sibSlim, start, teamState, test, world } from './world.tsx'
-import type { Surface } from './world.tsx'
+import { CRIT, cells, glyphText } from '../lib'
+import { KEPT, MIN, SNAP, SURFACES, T0, TASK, baseState, logged, mainTurn, measure, peek, peekCache, resumed, sibBase, run, sibSlim, start, teamState, test, world } from './world'
+import type { Surface } from './world'
 
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 200, scroll: { bodyRows: 10 }, view: {} }
 
@@ -223,7 +223,7 @@ describe('band', () => {
       ])
       const rates = (await unitsOf(ui)).filter(u => /^(5h|7d|7d·fable) \d+%$/.test(u.text))
       expect(rates.map(u => u.text)).toEqual(['5h 61%', '7d 34%', '7d·fable 12%'])
-      expect(rates[0].node.props).toMatchObject({ color: 'warning', bold: true })
+      expect(rates[0]!.node.props).toMatchObject({ color: 'warning', bold: true })
     })
 
     test(`${surface}: a window with a reset time trails it dim after the percentage; a narrow row drops it before the digest`, async ($, on) => {
@@ -608,7 +608,7 @@ describe('band', () => {
       const ui = await mount($, surface)
       await mainTurn($)
       expect(await shownModel(ui, surface)).toBe('fable-5-1')
-      await $.command.run({ command: 'model', args: 'opus' })
+      await run($, 'model', 'opus')
       expect(await shownModel(ui, surface)).toBe('opus')
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
     })
@@ -619,7 +619,7 @@ describe('band', () => {
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
-      await $.command.run({ command: 'model', args: 'opus' })
+      await run($, 'model', 'opus')
       await measure($, { window: 200_000, percent: 12 })
       expect(await shownModel(ui, surface)).toBe('opus')
       w.model = 'claude-opus-5-5'
@@ -648,7 +648,7 @@ describe('band', () => {
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
-      await $.command.run({ command: 'model', args: 'fable' })
+      await run($, 'model', 'fable')
       expect(await shownModel(ui, surface)).toBe('fable-5-1')
       expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
     })
@@ -1178,7 +1178,7 @@ describe('band', () => {
     w.rateLimits = [{ kind: 'five_hour', percentUsed: 61 }]
     await start($, 'desktop')
     await mount($, 'desktop', { bodyColumns: 77 })
-    const { text } = await $.command.run({ command: 'band-debug', args: '' })
+    const { text } = await run($, 'band-debug')
     expect(text).toStartWith('band debug\n')
     expect(text).toMatch(/^info: \{"v":1,"version":"[^"]+","disabled":false\}$/m)
     expect(text).toContain('usage(): {"startedAt":')
@@ -1197,7 +1197,7 @@ describe('band', () => {
     const ui = await mount($, 'terminal')
     await measure($, { window: 200_000, percent: 47 }, [{ kind: 'five_hour', percentUsed: 61 }], { usd: 139.14 })
     expect(await textOf(ui, /^cost /)).toBeUndefined()
-    expect((await $.command.run({ command: 'band-debug', args: '' })).text).toContain('"costUsd":null')
+    expect((await run($, 'band-debug')).text).toContain('"costUsd":null')
   })
 })
 

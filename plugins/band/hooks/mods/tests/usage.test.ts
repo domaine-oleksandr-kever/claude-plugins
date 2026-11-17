@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
-import { CLEAR_RESEED_MS, HOUR_MS, seedsTtl } from '../lib.ts'
-import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, compacted, logged, mainTurn, measure, ok, peek, peekCache, peekEvents, resumed, sibBase, start, test, world } from './world.tsx'
+import { CLEAR_RESEED_MS, HOUR_MS, seedsTtl } from '../lib'
+import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, compacted, logged, mainTurn, measure, ok, peek, peekCache, peekEvents, resumed, run, sibBase, start, test, world } from './world'
 
 const debug = async ($: any): Promise<string> => (await $.command.run({ command: 'band-debug', args: '' })).text
 
@@ -229,8 +229,8 @@ describe('event log writers → band.events', () => {
     world(on)
     on('command.run', { command: 'model' }, async () => ({ text: 'Set model to `Opus 5.5` and saved as your default for new sessions' }))
     await start($)
-    await $.command.run({ command: 'model', args: 'opus' })
-    await $.command.run({ command: 'model', args: 'opus' })
+    await run($, 'model', 'opus')
+    await run($, 'model', 'opus')
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model opus'])
   })
 
@@ -335,9 +335,9 @@ describe('the model atom before and after the first response', () => {
     w.model = 'claude-sonnet-5-5'
     await start($)
     expect((await peek($)).model).toBe('sonnet')
-    expect((await $.command.run({ command: 'model', args: 'opus' })).text).toBe('Switched to opus')
+    expect((await run($, 'model', 'opus')).text).toBe('Switched to opus')
     expect((await peek($)).model).toBe('opus')
-    await $.command.run({ command: 'model', args: 'opus' })
+    await run($, 'model', 'opus')
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model opus'])
   })
 
@@ -347,7 +347,7 @@ describe('the model atom before and after the first response', () => {
     w.settings = { model: 'sonnet' }
     await start($)
     await mainTurn($, undefined, 'claude-opus-5-5')
-    await $.command.run({ command: 'model', args: 'opus' })
+    await run($, 'model', 'opus')
     expect((await peek($)).model).toBe('claude-opus-5-5')
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-opus-5-5'])
   })
@@ -385,7 +385,7 @@ describe('the model atom before and after the first response', () => {
     answering(on, SONNET)
     w.settings = { model: 'opus' }
     await start($)
-    expect((await $.command.run({ command: 'model', args: 'sonnet' })).text).toBe(SONNET)
+    expect((await run($, 'model', 'sonnet')).text).toBe(SONNET)
     expect((await peek($)).model).toBe('sonnet')
     await clock.advance(30_000)
     expect((await peek($)).model).toBe('sonnet')
@@ -404,7 +404,7 @@ describe('the model atom before and after the first response', () => {
     w.model = 'claude-sonnet-5-5'
     w.settings = { model: 'opus' }
     await start($)
-    await $.command.run({ command: 'model', args: 'opus' })
+    await run($, 'model', 'opus')
     expect([(await peek($)).model, (await peekCache($)).isCold]).toEqual(['opus', false])
   })
 
@@ -414,7 +414,7 @@ describe('the model atom before and after the first response', () => {
       answering(on, text)
       w.settings = { model: 'sonnet' }
       await start($)
-      await $.command.run({ command: 'model', args: 'haiku' })
+      await run($, 'model', 'haiku')
       expect((await peek($)).model).toBe('haiku')
     })
   }
@@ -424,7 +424,7 @@ describe('the model atom before and after the first response', () => {
     answering(on, 'Set model to `Opus 5.5 (1M context)` and saved as your default for new sessions')
     w.settings = { model: 'sonnet' }
     await start($)
-    await $.command.run({ command: 'model', args: 'opus[1m]' })
+    await run($, 'model', 'opus[1m]')
     expect((await peek($)).model).toBe('opus')
   })
 
@@ -436,7 +436,7 @@ describe('the model atom before and after the first response', () => {
     await start($)
     await mainTurn($, undefined, 'claude-sonnet-5-5')
     expect((await peekCache($)).isCold).toBe(false)
-    await $.command.run({ command: 'model', args: 'haiku' })
+    await run($, 'model', 'haiku')
     expect([(await peek($)).model, (await peekCache($)).isCold]).toEqual(['haiku', true])
     await measure($, { window: 200_000, percent: 10 })
     expect((await peek($)).model).toBe('haiku')
@@ -453,7 +453,7 @@ describe('the model atom before and after the first response', () => {
     w.settings = { model: 'opus' }
     await start($)
     await mainTurn($, undefined, 'claude-sonnet-5-5')
-    await $.command.run({ command: 'model', args: 'sonnet' })
+    await run($, 'model', 'sonnet')
     expect([(await peek($)).model, (await peekCache($)).isCold]).toEqual(['claude-sonnet-5-5', false])
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-sonnet-5-5'])
   })

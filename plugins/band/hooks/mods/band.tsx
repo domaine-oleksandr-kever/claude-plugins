@@ -40,10 +40,10 @@ import {
   resetMark,
   splitLabel,
   toChecklist,
-} from './lib.ts'
-import type { ModelOption } from './lib.ts'
-import { anyEvent, take } from './events.ts'
-import { modelRan } from './usage.ts'
+} from './lib'
+import type { ModelOption } from './lib'
+import { anyEvent, take } from './events'
+import { modelRan } from './usage'
 
 const usage = atom({ plugin: 'band', key: 'usage' } as const, USAGE_INIT)
 const model = atom({ plugin: 'band', key: 'model' } as const, null)
@@ -85,7 +85,7 @@ let compactInFlight = false
  * Saves, then queues /compact behind the save's turn: only a queued command is sure to run after that turn. A failed
  * save or a workspace base still reports stale never cancels the compaction the person asked for: `note` says why.
  */
-function saveThenCompact($: $, args: string): Promise<{ text: string; note: string | null }> {
+function saveThenCompact($: $, args: string): Promise<{ text: string | undefined; note: string | null }> {
   const compact = (failed: string | null) =>
     $.command.run({ command: 'compact', args }).then(async r => {
       if (failed !== null) return { text: r.text, note: `save failed (${failed}) — compacted anyway` }
@@ -316,7 +316,7 @@ export function registerBand(on: On, options: PluginOptions): void {
     // The reset time trails the bold value, dim, once per group of windows sharing it: rowText measures the same ` ↻2h05m`.
     const resets = groupResets(segs.rates, segs.resetsNowMs)
     const rate = (r: BandRate, i: number): RenderNode[] => {
-      const reset = resetMark(resets[i])
+      const reset = resetMark(resets[i] ?? null)
       const pct = labeled(rateText(r), dimLabel, { bold: true, ...LEVEL_PROPS[pctLevel(r.pct)] })
       const body = reset ? (
         <Box flexDirection="row">

@@ -5,8 +5,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Timer } from 'claude-code'
 import type { BandAccount } from '../../types'
-import { CLEAR_RESEED_MS, accountLabel, accountMode, creditGate, loginAccount, loginPaths, profileAccount } from './lib.ts'
-import type { AccountFacts, AccountMode } from './lib.ts'
+import { CLEAR_RESEED_MS, accountLabel, accountMode, creditGate, loginAccount, loginPaths, profileAccount } from './lib'
+import type { AccountFacts, AccountMode } from './lib'
 
 const account = atom({ plugin: 'band', key: 'account' } as const, null)
 
@@ -35,7 +35,7 @@ export function accountDebug() {
   return { mode, ...(attempt ?? { at: null }) }
 }
 
-const oneLine = (err: unknown) => (err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 200)
+const oneLine = (err: unknown) => (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 200)
 
 /** Asks the profile endpoint once per session, then reads again; never throws, and no read waits on it. */
 async function askProfile($: $, handle: string): Promise<void> {

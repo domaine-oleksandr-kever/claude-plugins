@@ -1,7 +1,7 @@
 import { describe, expect, mock } from 'claude-code/testing'
-import type { On } from 'claude-code'
-import { NO_CHECKLIST_TEXT } from '../checklist.tsx'
-import { SNAP, SURFACES, peek, sibBase, test } from './world.tsx'
+import type { On, RenderSurface } from 'claude-code'
+import { NO_CHECKLIST_TEXT } from '../checklist'
+import { SNAP, SURFACES, peek, sibBase, test } from './world'
 
 const NOW = 1_800_000_000_000
 const PANE = 'band-progress'
@@ -17,7 +17,7 @@ function world(on: On, o: { progress?: unknown; panes?: Pane[] } = {}) {
     opens: [] as unknown[],
     closes: [] as unknown[],
     toasts: [] as string[],
-    surfaces: ['terminal'] as string[],
+    surfaces: ['terminal'] as RenderSurface[],
   }
   mock.clock(on, { now: NOW })
   mock.store(on)

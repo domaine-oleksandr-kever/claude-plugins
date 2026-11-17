@@ -1,6 +1,6 @@
 import { describe, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { peek, start, test } from './world.tsx'
+import { peek, run, start, test } from './world'
 
 const MANIFEST = /^\/.+\/plugins\/band\/\.claude-plugin\/plugin\.json$/
 const VERSION = '0.0.0-kit'
@@ -82,7 +82,7 @@ describe('band.info', () => {
   test('written before next: a plugin beneath session.start already reads it', { plugins: [BENEATH] }, async ($, on) => {
     world(on)
     await start($)
-    expect(JSON.parse((await $.command.run({ command: 'seen', args: '' })).text)).toEqual({ v: 1, version: VERSION, disabled: false })
+    expect(JSON.parse((await run($, 'seen')).text!)).toEqual({ v: 1, version: VERSION, disabled: false })
   })
 })
 

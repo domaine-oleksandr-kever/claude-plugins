@@ -2,7 +2,8 @@
 // from env), base's published state answered beneath band, and a reader of band's own state. Not a test file
 // itself: only *.test.ts(x) run.
 import { mock, test as kitTest } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { Engine, TestRest } from 'claude-code/testing'
+import type { On, RenderSurface } from 'claude-code'
 
 export const MIN = 60_000
 export const T0 = 1_700_000_000_000
@@ -93,7 +94,7 @@ export const PEEK = {
 export const SIBLINGS = [BASE_SIBLING, SLIM_SIBLING, PEEK]
 
 /** The kit's test with base, slim and the reader loaded beside band in every test, and a test's own plugins after them. */
-export const test = (name: string, ...rest: any[]): void => {
+export const test = (name: string, ...rest: TestRest): void => {
   const [options, body] = rest.length === 1 ? [{}, rest[0]] : [rest[0], rest[1]]
   kitTest(name, { ...options, plugins: [...SIBLINGS, ...(options.plugins ?? [])] }, body)
 }
@@ -104,6 +105,9 @@ export const peekEvents = async ($: any): Promise<{ atMs: number; kind: string; 
 export const logged = async ($: any) => (await peekEvents($)).map(ev => `${ev.kind} ${ev.text}`)
 export const sibBase = ($: any) => $.command.run({ command: 'sib-base', args: '' })
 export const sibSlim = ($: any) => $.command.run({ command: 'sib-slim', args: '' })
+/** A slash command typed in the composer. */
+export const run = ($: Engine, command: string, args = '') =>
+  $.command.run({ command, args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
 
 /** base's resolved task: ELC-1591, three of five rows done. */
 export const SNAP = {
@@ -202,7 +206,7 @@ export function world(on: On, store: Record<string, unknown> = {}, env: Record<s
   on('session.root', async () => ({ value: '/repo' }))
   on('session.surfaces', async () => ({ value: w.surfaces }) as never)
   on('session.usage', async () => ({ value: { startedAt: T0, context: w.context, rateLimits: w.rateLimits, cost: w.cost } }))
-  on('session.model', async () => ({ value: w.model }))
+  on('session.model', async () => (w.model === null ? { deny: 'no model bound' } : { value: w.model }))
   on('settings.read', async () => ({ value: (w.settings ?? { model: w.model }) as any }))
   on('session.authorize', async () => ({ value: w.auth }))
   on('http.fetch', async (_$, e) => {
@@ -235,7 +239,7 @@ export function world(on: On, store: Record<string, unknown> = {}, env: Record<s
     w.panes.length = 0
     return { value: undefined }
   })
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
+  on('ui.render', { component: 'AbovePrompt', plugin: 'band' }, async ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine band</Text>
   })

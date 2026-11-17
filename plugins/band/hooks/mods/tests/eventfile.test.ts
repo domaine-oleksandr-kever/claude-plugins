@@ -1,7 +1,7 @@
 import { describe, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { FILE_CAP_BYTES, FILE_CAP_LINES, capLines, fileLine, logDir, seedLines } from '../events.ts'
-import { T0, logged, test } from './world.tsx'
+import { FILE_CAP_BYTES, FILE_CAP_LINES, capLines, fileLine, logDir, seedLines } from '../events'
+import { T0, logged, test } from './world'
 
 /** Every test gets its own HOME, so no module-held file of an earlier test is mistaken for this one's. */
 let homes = 0
