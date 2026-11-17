@@ -4,7 +4,7 @@
 // X or cheaper, `/base-edit-direct` for this session id, BASE_GUARD=0. No marker or no `edit.model` = no edit guard, no
 // count. Apart from that, whenever base runs: a main-loop read of a drafter's draft (`.claude/tasks/<id>/steps-to-test.md`,
 // `pr-body.md`, `jira-comment.md`: Read, Grep, slim view, or a Bash command naming one outside drafter-check, a
-// printf/echo receipt piped into it, gh --body-file, test, ls or a write to it) is refused on any model; only
+// printf/echo receipt piped into it, gh --body-file, test, ls, a count-only `wc -c < draft` or a write to it) is refused on any model; only
 // BASE_GUARD=0 lifts it.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
@@ -33,6 +33,18 @@ const DRAFT_ARG = /(?:\.claude\/tasks\/[^\s'"/]+|\$\{?\w+\}?)\/(?:steps-to-test|
 // the sanctioned consumers of a draft path: the checker, gh's --body-file, an existence test, a listing
 const DRAFT_OK = /drafter-check\.cjs\b|\bgh\s+pr\s+(?:create|edit)\b[^\n]*--body-file|^\s*(?:test|\[)\s+-[sef]\s|^\s*ls\b/
 const CHECKER = /drafter-check\.cjs\b/
+// a whole stage that prints only counts of one draft on stdin (`wc -c < path`): a file argument would print its path too
+const COUNT = new RegExp(String.raw`^\s*wc(?:\s+-[clwm]+)+\s*<\s*(['"]?)(?:[^\s'"\`$()<>;|&\\]|\$\{?\w+\}?)*${DRAFT_ARG.source}\1\s*$`)
+// what can rebind `wc` under any spelling of its name (a function, alias, hash or zsh table entry, sourced or eval'd code,
+// a trap, a builtin, a variable set by name) or move PATH: any of it voids the count exemption for the whole command
+const WC_REBOUND = new RegExp(String.raw`\(\s*\)|\b(?:function|alias|hash|eval|source|trap|enable|autoload|zmodload|read|mapfile|readarray|declare|typeset|let|getopts)\b|\bprintf\s+-v\b|(?:^|[;&|\n({])\s*\.\s|\w\[[^\]]*\]\+?=|\b(?:PATH|path)\b|\$\{[^}]*=|\b(?:export|local|readonly)\s+(?:-\S+\s+)*["'$\\]`)
+const WC_WORD = /(?<![\w-])wc\b/g
+const WC_HEAD = /(?:^|[;&|\n])\s*wc\s+-/g
+// a wc anywhere but at the head of a command (`alias 'wc=cat'`, `functions[wc]=cat`) is a rebinding too
+const wcRebound = (command: string) =>
+  WC_REBOUND.test(command) || (command.match(WC_WORD)?.length ?? 0) > (command.match(WC_HEAD)?.length ?? 0)
+// what hides a `<<` from the shell (quotes, an escape, a comment) is dropped before a heredoc start is looked for
+const NO_HEREDOC = /<<-?\s*(['"]?)\w+\1|\\.|'[^']*'|"(?:[^"\\]|\\.)*"|(?<=^|\s)#.*$/g
 // a drafter's receipt piped into the checker: a printf/echo that cannot print the draft (no substitution) or copy it aside
 const RECEIPT = (seg: string) => /^\s*(?:printf|echo)\b/.test(seg) && !/>&|\btee\b|\$\(|`/.test(seg.replace(/'[^']*'/g, "''"))
 // a draft as the target of a write (`> path`, `>> path`, `>| path`, `tee [-a] path`): its text never reaches the session
@@ -57,7 +69,7 @@ export const editRefusal = (model: string) =>
 export const draftRefusal = (rel: string) =>
   `base drafter rule: ${rel} is a drafter agent's draft — never read, quote or paraphrase it. Show its path; a change ` +
   `goes to the same agent via SendMessage, and jira-writer / gh pr create --body-file take the path; writing your own ` +
-  `approved text to it (\`cat > path <<'EOF'\`) is no read. Refused on ` +
+  `approved text to it (\`cat > path <<'EOF'\`) and a count alone (\`wc -c < path\`) are no read. Refused on ` +
   `any model and after /base-edit-direct too; only BASE_GUARD=0 lifts it.`
 
 const mainEdits = atom({ plugin: 'base', key: 'mainEdits' } as const, null as BaseMainEdits | null)
@@ -135,6 +147,7 @@ async function modelFor($: $, sid: string): Promise<string | null> {
 export function shellReadsDraft(command: string): boolean {
   const vars = new Map<string, string>()
   const expand = (s: string) => s.replace(/\$\{?(\w+)\}?/g, (m, v: string) => vars.get(v) ?? m)
+  const counts = wcRebound(command) ? () => false : (seg: string) => COUNT.test(seg) && !/\$\(|`/.test(seg)
   return splitUnquoted(withoutHeredocs(command), SEGMENT_SEP).some(raw => {
     // a draft path parked in a variable is no read; its later use is matched with the value substituted
     if (ASSIGN_ONLY.test(raw)) {
@@ -143,7 +156,7 @@ export function shellReadsDraft(command: string): boolean {
     }
     const stages = splitUnquoted(expand(raw), STAGE_SEP)
     const last = stages.map(seg => CHECKER.test(seg)).lastIndexOf(true)
-    return stages.some((seg, i) => DRAFT_ARG.test(seg.replace(DRAFT_WRITE, '')) && !DRAFT_OK.test(seg) && !(i < last && RECEIPT(seg)))
+    return stages.some((seg, i) => DRAFT_ARG.test(seg.replace(DRAFT_WRITE, '')) && !DRAFT_OK.test(seg) && !counts(seg) && !(i < last && RECEIPT(seg)))
   })
 }
 
@@ -193,7 +206,8 @@ function withoutHeredocs(command: string): string {
       continue
     }
     out.push(line)
-    const m = HEREDOC.exec(line)
+    // an arithmetic `((1<<n))` is a shift, not a heredoc
+    const m = /\(\(/.test(line) ? null : HEREDOC.exec(line.replace(NO_HEREDOC, h => (h.startsWith('<<') ? h : '')))
     if (m) end = m[2]
   }
   return out.join('\n')

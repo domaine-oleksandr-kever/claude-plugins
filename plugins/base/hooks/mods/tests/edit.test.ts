@@ -322,9 +322,39 @@ describe('draft read guard', () => {
       `printf x | tee -a ${J} >/dev/null`, `W=/repo/.claude/tasks/ABC-1; cat > "$W/pr-body.md" <<EOF\nbody\nEOF`,
       `cat >| ${J} <<'EOF'\nbody\nEOF`, `printf x | tee -- ${J}`, `printf x | tee --append ${J} >/dev/null`])
       expect(shellReadsDraft(c)).toBe(false)
-    for (const c of [`cat ${J}`, `sed -n 1,5p ${J}`, `grep x ${J}`, `cat ${J} > /tmp/x`, `cat ${J} > /dev/null`, `cp ${J} /tmp/x`, `wc -l < ${J}`,
+    for (const c of [`cat ${J}`, `sed -n 1,5p ${J}`, `grep x ${J}`, `cat ${J} > /tmp/x`, `cat ${J} > /dev/null`, `cp ${J} /tmp/x`,
       `cat ${J} >> ${J}`, `cat >/tmp/x<${J}`, `echo "$(cat ${J})" > ${J}`, `cat > ${J} <<'EOF'\nx\nEOF\ncat ${J}`])
       expect(shellReadsDraft(c)).toBe(true)
+  })
+
+  test('a count-only wc of a draft on stdin is no read; a file argument, a pipe into wc or a rebound wc is', async () => {
+    const J = '.claude/tasks/ELC-1812/jira-comment.md'
+    for (const c of [`wc -c < ${J}`, `wc -l < ${J}`, `wc -w <${J}`, `wc -m<${J}`, `wc -lw < "/repo/${J}"`, `wc -c < "$PWD/${J}"`,
+      `W=/repo/.claude/tasks/ELC-1812; wc -c < "$W/jira-comment.md"`, `wc -c < ${J} | tr -d ' '`, `wc -c < ${J} && test -s ${J}`, `wc -wc < ${J}`,
+      `wc -c < ${J}; wc -l < ${J}`, `export W=/repo/.claude/tasks/ELC-1812 && wc -c < $W/jira-comment.md`])
+      expect(shellReadsDraft(c)).toBe(false)
+    for (const c of [`wc -c ${J}`, `wc -w ${J}`, `wc -lw "/repo/${J}"`, `wc -c ${J} | awk '{print $2}' | xargs cat`,
+      `wc -c < ${J} ${J}`, `cat ${J} | wc -c; cat ${J}`, `wc -c ${J} && head ${J}`, `wc -c < ${J}; sed -n 1p ${J}`, `cat ${J} | wc -c`,
+      `wc -c $(cat ${J})`, `echo $(wc -c < ${J}; cat ${J})`, `wc -c \`cat ${J}\``, `wc -c ${J} ${J} 2>&1; cat ${J}`, `wc -L < ${J}`,
+      `wc --files0-from=${J}`, `wc -c ${J} > /tmp/x`, `wc -c <<< "$(cat ${J})"`, `wc -c <(cat ${J})`, `wc() { cat "$@"; }; wc -c < ${J}`,
+      `alias wc=cat; wc -c < ${J}`, `function wc { cat; }; wc -c < ${J}`, `wc -c < ${J} | cat ${J}`, `wc -c ${J} /etc/hosts`,
+      `PATH=.:$PATH; wc -c < ${J}`, `export PATH=/tmp/bin:$PATH && wc -c < ${J}`, `PATH=/tmp/bin wc -c < ${J}`,
+      `hash -p /bin/cat wc; wc -c < ${J}`, `'wc'() { cat; }; wc -c < ${J}`, `w''c() cat; wc -c < ${J}`, `alias 'wc=cat'; wc -c < ${J}`,
+      `alias x=y wc=cat; wc -c < ${J}`, `functions[wc]=cat; wc -c < ${J}`, `aliases[wc]=cat\nwc -c < ${J}`, `hash wc=/tmp/cat; wc -c < ${J}`,
+      `commands[wc]=/tmp/cat; wc -c < ${J}`, `path=(/tmp/bin $path); wc -c < ${J}`, `: \${PATH::=/tmp/bin}; wc -c < ${J}`,
+      `eval "w""c(){ cat; }"; wc -c < ${J}`, `. /tmp/defs; wc -c < ${J}`, `source /tmp/defs; wc -c < ${J}`,
+      `trap 'eval "\${BASH_COMMAND/wc -c </cat}"' DEBUG; wc -c < ${J}`, `enable -f /tmp/x.so wc; wc -c < ${J}`,
+      `n=PATH; export "$n"=/tmp/bin; wc -c < ${J}`, `printf -v PATH /tmp; wc -c < ${J}`, `read PATH <<< /tmp; wc -c < ${J}`])
+      expect(shellReadsDraft(c)).toBe(true)
+  })
+
+  test('a << the shell does not read as a heredoc (quoted, escaped, commented, a shift) hides no line after it', async () => {
+    const J = '.claude/tasks/ELC-1812/jira-comment.md'
+    for (const c of [`echo '<<EOF'\ncat ${J}\nEOF`, `echo "a<<EOF"\ncat ${J}\nEOF`, `echo \\<<EOF\ncat ${J}\nEOF`,
+      `echo x # <<EOF\ncat ${J}\nEOF`, `echo $((1<<EOF))\ncat ${J}\nEOF`, `cat <<'EOF' > 'x'\nbody\nEOF\ncat ${J}`])
+      expect(shellReadsDraft(c)).toBe(true)
+    for (const c of [`cat <<'EOF' > ${J}\ncat ${J}\nEOF`, `cat > "${J}" <<-EOF\ncat ${J}\n\tEOF`, `cat > '${J}' <<"EOF"\ncat ${J}\nEOF`])
+      expect(shellReadsDraft(c)).toBe(false)
   })
 
   test('a draft path in a shell variable: the assignment is no read, a later use is matched with the value', async () => {
@@ -350,6 +380,7 @@ describe('draft read guard', () => {
     expect((await edits($)).refused).toBe(3)
     expect((await bash($, `node /fe/scripts/drafter-check.cjs file stt ${D}`)).deny).toBeUndefined()
     expect((await bash($, `gh pr create --title t --body-file ${TASKS}/ABC-1/pr-body.md`)).deny).toBeUndefined()
+    expect((await bash($, `wc -c < ${TASKS}/ABC-1/jira-comment.md`)).deny).toBeUndefined()
     expect((await bash($, `cat ${D}`, { agentId: 'a1' })).deny).toBeUndefined()
     expect((await edits($)).refused).toBe(3)
   })
