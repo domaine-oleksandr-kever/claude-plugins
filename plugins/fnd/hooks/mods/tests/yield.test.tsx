@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import type { On } from 'claude-code'
-import { MOVED, bandLive } from '../core/events.ts'
+import type { On, RenderSurface } from 'claude-code'
+import { MOVED, bandLive } from '../core/events'
 
 const T0 = 1_800_000_000_000
 const ROOT = '/repo'
@@ -68,7 +68,7 @@ function world(on: On, env: Record<string, string> = {}) {
   on('session.cwd', async () => ({ value: ROOT }))
   on('session.id', async () => ({ value: 's1' }))
   on('session.model', async () => ({ value: w.model }))
-  on('session.surfaces', async () => ({ value: w.surfaces }))
+  on('session.surfaces', async () => ({ value: w.surfaces as RenderSurface[] }))
   on('session.usage', async () => ({ value: { startedAt: T0, context: { window: 200_000, percent: 40 }, rateLimits: [] } }))
   on('session.measure', async (_$, e) => ({ changed: e.changed }))
   on('session.compact', async () => (await w.compact()) as never)
@@ -118,10 +118,6 @@ function world(on: On, env: Record<string, string> = {}) {
     w.toasts.push(e.text)
     return { value: undefined }
   })
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
-    const { Text } = $.ui.resolve(e)
-    return <Text>engine band</Text>
-  })
   return { w, clock }
 }
 
@@ -141,7 +137,7 @@ const mount = ($: any, surface: Surface) =>
 const strOf = (n: any): string => (n?.children ?? []).filter((c: any) => typeof c === 'string').join('')
 const allText = (n: any): string[] =>
   !n || typeof n !== 'object' ? [] : [...(n.type === 'Text' ? [strOf(n)] : []), ...(n.children ?? []).flatMap(allText)]
-const drawsEngineBand = async (ui: any) => allText(await ui.drawn()).includes('engine band')
+const drawsEngineBand = async (ui: any) => (await ui.drawn()).type === 'engine'
 
 const withBand = (info: unknown, env: Record<string, string> = {}) => ({ ...env, SIB_BAND_INFO: JSON.stringify(info) })
 
@@ -305,8 +301,9 @@ const DRAWING_BAND = {
 
 describe('fnd beside a band that draws beneath it', () => {
   const drawn = async (ui: any) => {
-    const texts = allText(await ui.drawn())
-    return { band: texts.includes('band plugin row'), engine: texts.includes('engine band'), fnd: (await ui.find({ key: 'compact' })) !== undefined }
+    const tree = await ui.drawn()
+    const texts = allText(tree)
+    return { band: texts.includes('band plugin row'), engine: tree.type === 'engine', fnd: (await ui.find({ key: 'compact' })) !== undefined }
   }
   for (const surface of SURFACES) {
     test(`${surface}: band.info seeded → band's row shows, fnd's does not`, { plugins: [DRAWING_BAND] }, async ($, on) => {

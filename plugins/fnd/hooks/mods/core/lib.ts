@@ -343,7 +343,7 @@ export function modelOptions(current: string | null): ModelOption[] {
   return ids.map(value => {
     const label = shortModel(value) as string
     const letter = label[0]
-    if (!/^[a-z]$/.test(letter) || taken.has(letter)) return { value, label }
+    if (letter === undefined || !/^[a-z]$/.test(letter) || taken.has(letter)) return { value, label }
     taken.add(letter)
     return { value, label, hotkey: letter }
   })

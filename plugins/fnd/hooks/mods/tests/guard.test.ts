@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { DENY_FALLBACK, guardNote } from '../fnd/guard.ts'
+import { DENY_FALLBACK, guardNote } from '../fnd/guard'
 
 const GUARDED = [
   'mcp__plugin_fnd_chrome-devtools-mcp__take_screenshot',
@@ -8,7 +8,7 @@ const GUARDED = [
   'mcp__plugin_fnd_chrome-devtools-mcp__take_snapshot',
   'mcp__plugin_fnd_chrome-devtools-mcp__get_network_request',
   'mcp__plugin_fnd_playwright__browser_run_code_unsafe',
-]
+] as const
 const SHOT = GUARDED[0]
 const PROVIDER = { plugin: 'mcp:chrome-devtools', tier: 'user' } as any
 
@@ -180,7 +180,7 @@ describe('B2 tool.call delegation', () => {
     live.root = '/moved'
     await $.tool.call({ tool: SHOT, tool_use_id: 'toolu_1', filePath: '/tmp/a.png', format: 'png' } as any)
     expect(runs.length).toBe(1)
-    const [run] = runs
+    const run = runs[0]!
     expect(run.argv[0]).toBe('node')
     expect(run.argv[1]).toEndWith('/hooks/scratch-path-guard.cjs')
     expect(run.argv.slice(2)).toEqual(['--from-mod'])

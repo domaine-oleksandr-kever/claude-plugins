@@ -2,8 +2,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { FndEvent, FndEventKind } from '../../../types'
-import { bare, pushEvent, toolName } from '../core/events.ts'
-import { buildHookRun, omit, parseHookOut } from './node-hook.ts'
+import { bare, pushEvent, toolName } from '../core/events'
+import { buildHookRun, omit, parseHookOut } from './node-hook'
 
 /** Same source as the plugin.json PreToolUse matcher of scratch-path-guard.cjs (layout-assertions pins it). */
 export const GUARDED_RE =

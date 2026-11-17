@@ -7,7 +7,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, RenderNode } from 'claude-code'
 import type { FndBandInfo, FndRate } from '../../../types'
-import { bandLive } from './events.ts'
+import { bandLive } from './events'
 import {
   CACHE_INIT,
   CTX_PROPS,
@@ -31,8 +31,8 @@ import {
   rateCard,
   rateText,
   splitLabel,
-} from './lib.ts'
-import { digestText } from './progress-parse.ts'
+} from './lib'
+import { digestText } from './progress-parse'
 
 const usage = atom({ plugin: 'fnd', key: 'usage' } as const, USAGE_INIT)
 const model = atom({ plugin: 'fnd', key: 'model' } as const, null)

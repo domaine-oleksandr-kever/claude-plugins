@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, RenderSurface } from 'claude-code'
 import type { FndEvent } from '../../../types'
-import { EVENT_CAP, PREFIX_COLS, bare, fmtK, hhmm, kindCell, merged, newestFitting, pushEvent, textRows, toolName } from '../core/events.ts'
+import { EVENT_CAP, PREFIX_COLS, bare, fmtK, hhmm, kindCell, merged, newestFitting, pushEvent, textRows, toolName } from '../core/events'
 
 const NOW = new Date(2027, 0, 15, 9, 5).getTime()
 const PANE = 'fnd-log'
@@ -31,7 +31,7 @@ function world(on: On, env: Record<string, string> = {}) {
   on('session.id', async () => ({ value: 's1' }))
   on('session.model', async () => ({ value: w.model }))
   on('session.usage', async () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] } }))
-  on('session.surfaces', async () => ({ value: w.surfaces }))
+  on('session.surfaces', async () => ({ value: w.surfaces as RenderSurface[] }))
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
   on('classic.PostModelSwitch', async () => ({}) as never)
   on('ui.panes', async () => ({ value: w.panes }))

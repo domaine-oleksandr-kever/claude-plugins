@@ -2,8 +2,8 @@
 import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { FndEvent, FndEventKind } from '../../../types'
-import { bare, pushEvent } from '../core/events.ts'
-import { buildHookRun, parseHookOut, toastMs } from './node-hook.ts'
+import { bare, pushEvent } from '../core/events'
+import { buildHookRun, parseHookOut, toastMs } from './node-hook'
 
 const PROMPT_MIN = 10240 // prompt-json-guard.cjs's gate in UTF-8 bytes (layout-assertions pins it); one UTF-16 unit is at most 3 of them
 const RUN_MS = 20_000
@@ -24,7 +24,7 @@ async function logEvent($: $, kind: FndEventKind, text: string): Promise<void> {
 }
 
 export function registerPromptSlim(on: On): void {
-  on('prompt.submit', { origin: { kind: ['composer', 'bridge', 'sdk'] } }, async ($, e, next) => {
+  on('prompt.submit', { origin: { kind: /^(?:composer|bridge|sdk)$/ } }, async ($, e, next) => {
     if (!due(e.text)) return next(e)
     let rw: Rewrite | null = null
     try {

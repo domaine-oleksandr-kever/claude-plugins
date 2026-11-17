@@ -3,10 +3,10 @@
 // itself, so every hook here stands down: two writers would toast the rate alarm and log each line twice.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
-import type { FndBandInfo, FndEvent, FndEventKind, FndUsage } from '../../../types'
-import { MOVED, bandLive, fmtK, pushEvent } from './events.ts'
-import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, keepCtx, oneHourCacheTokens, rateCard, toUsage, ttlMsOf } from './lib.ts'
-import { lastRender, turn } from './band.tsx'
+import type { FndBandInfo, FndCache, FndEvent, FndEventKind, FndUsage } from '../../../types'
+import { MOVED, bandLive, fmtK, pushEvent } from './events'
+import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, keepCtx, oneHourCacheTokens, rateCard, toUsage, ttlMsOf } from './lib'
+import { lastRender, turn } from './band'
 
 const TICK_MS = 30_000
 const ALARM_TOAST_MS = 8000
@@ -99,7 +99,7 @@ async function defaultTtl($: $): Promise<number> {
  */
 async function adoptSubscriptionTtl($: $, u: FndUsage): Promise<void> {
   if (u.rates.length === 0) return
-  await update($, cache, c =>
+  await update($, cache, (c): FndCache =>
     c.ttlSource === 'default' || c.ttlSource === 'store' ? { ...c, ttlMs: HOUR_MS, ttlSource: 'subscription' } : c,
   )
 }
@@ -138,7 +138,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
     const ttlMs = forcedTtl ?? learned ?? (await defaultTtl($).catch(() => CACHE_INIT.ttlMs))
     costShown = ON.has((await $.env.get('FND_BAND_COST').catch(() => undefined))?.trim().toLowerCase() ?? '')
     const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
-    await update($, cache, c => ({ ...c, ttlMs, ttlSource }))
+    await update($, cache, (c): FndCache => ({ ...c, ttlMs, ttlSource }))
     try {
       const m = await $.session.model()
       await update($, model, () => m)

@@ -95,7 +95,7 @@ describe('rewrite', () => {
     expect(bottom).toEqual([{ text: RW.text, context: [RW.context], turnId: undefined, wait: false }])
     expect(toasts).toEqual([{ text: RW.summary, timeoutMs: 5000 }])
     expect(runs.length).toBe(1)
-    const [run] = runs
+    const run = runs[0]!
     expect(run.argv[0]).toBe('node')
     expect(run.init?.env?.CLAUDE_PLUGIN_ROOT).toMatch(/\/plugins\/fnd$/)
     expect(run.argv[1]).toBe(`${run.init?.env?.CLAUDE_PLUGIN_ROOT}/hooks/prompt-json-guard.cjs`)
@@ -196,7 +196,7 @@ describe('fallback to the typed text', () => {
     await submit($, BIG)
     expect(runs.length).toBe(1)
     expect(bottom.length).toBe(1)
-    expect(bottom[0].text).not.toBe(BIG)
+    expect(bottom[0]!.text).not.toBe(BIG)
     expect(toasts).toEqual([])
   })
 

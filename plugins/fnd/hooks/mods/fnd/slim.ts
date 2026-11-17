@@ -4,8 +4,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { FndEvent, FndEventKind, FndSlimInfo } from '../../../types'
-import { bare, pushEvent, toolName } from '../core/events.ts'
-import { buildHookRun, omit, parseHookOut, slimFigureIn, stubBytes, stubText, toastMs } from './node-hook.ts'
+import { bare, pushEvent, toolName } from '../core/events'
+import { buildHookRun, omit, parseHookOut, slimFigureIn, stubBytes, stubText, toastMs } from './node-hook'
 
 const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
 const proxyNotice = atom({ plugin: 'fnd', key: 'proxyNotice' } as const, null as string | null)

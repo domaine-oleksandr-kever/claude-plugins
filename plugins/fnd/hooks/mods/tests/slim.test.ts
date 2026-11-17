@@ -67,7 +67,7 @@ describe('C1 host-stub replacement', () => {
     const r = await $.tool.call({ tool: TOOL, jql: 'project = ELC' } as any)
     expect(r).toEqual({ result: SLIMMED })
     expect(runs.length).toBe(1)
-    const [run] = runs
+    const run = runs[0]!
     expect(run.argv[0]).toBe('node')
     expect(run.argv[1]).toEndWith('/hooks/mcp-slim.cjs')
     expect(run.argv.slice(2)).toEqual(['--from-mod', '--overflow=expand'])

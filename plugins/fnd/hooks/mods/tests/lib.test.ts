@@ -39,8 +39,8 @@ import {
   shortModel,
   splitLabel,
   toRates,
-} from '../core/lib.ts'
-import type { BandSegs } from '../core/lib.ts'
+} from '../core/lib'
+import type { BandSegs } from '../core/lib'
 
 const MIN = 60_000
 const HOUR = 60 * MIN

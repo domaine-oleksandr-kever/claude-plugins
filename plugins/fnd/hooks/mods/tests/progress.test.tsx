@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
+import type { FoundElement } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { digestText } from '../core/progress-parse.ts'
+import { digestText } from '../core/progress-parse'
 
 const ROOT = '/repo'
 const TASKS = `${ROOT}/.claude/tasks`
@@ -46,7 +47,7 @@ function world(on: On, over: Partial<World> = {}) {
   on('session.id', async () => ({ value: w.sid }))
   on('session.model', async () => ({ value: 'claude-opus-5-5' }))
   on('session.usage', async () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] } }))
-  on('env.set', async () => ({ value: undefined }))
+  on('env.set', async () => ({ value: {} }))
   on('settings.read', async () => ({ value: { env: {} } as any }))
   on('process.run', async (_$, e) => {
     if (e.argv[0] !== 'git') throw new Error(`unexpected spawn ${e.argv[0]}`)
@@ -645,8 +646,8 @@ describe('command and pane', () => {
       expect(todo?.props.bold).toBeFalsy()
       expect(todo?.props.dimColor).toBeFalsy()
       const footer = await ui.findAll({ type: 'Text', text: /^- (two|three|four)$/ })
-      expect(footer.map(f => f.text)).toEqual(['- two', '- three', '- four'])
-      expect(footer.every(f => f.props.dimColor === true)).toBe(true)
+      expect(footer.map((f: FoundElement) => f.text)).toEqual(['- two', '- three', '- four'])
+      expect(footer.every((f: FoundElement) => f.props.dimColor === true)).toBe(true)
       await ui.unmount()
     }
   })
@@ -689,7 +690,7 @@ describe('command and pane', () => {
     await submit($, 'see ELC-77')
     const ui = await $.ui.mount({ plugin: 'fnd', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS as any })
     const texts = await ui.findAll({ type: 'Text' })
-    expect(texts.map(x => x.text)).toEqual(['ELC-77 · feature/ELC-1591-x', 'no task workspace — /fnd:save-task-context'])
+    expect(texts.map((x: FoundElement) => x.text)).toEqual(['ELC-77 · feature/ELC-1591-x', 'no task workspace — /fnd:save-task-context'])
     await ui.unmount()
   })
 
@@ -699,7 +700,7 @@ describe('command and pane', () => {
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ plugin: 'fnd', surface, component: 'Pane', requestId: PANE, props: PANE_PROPS as any })
       const texts = await ui.findAll({ type: 'Text' })
-      expect(texts.map(x => x.text)).toEqual(['no task workspace — /fnd:save-task-context'])
+      expect(texts.map((x: FoundElement) => x.text)).toEqual(['no task workspace — /fnd:save-task-context'])
       await ui.unmount()
     }
   })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { buildHookRun, omit, parseHookOut, slimFigure, slimFigureIn, stubBytes, stubText, toastMs } from '../fnd/node-hook.ts'
+import { buildHookRun, omit, parseHookOut, slimFigure, slimFigureIn, stubBytes, stubText, toastMs } from '../fnd/node-hook'
 
 const run = (stdout: string, over: Partial<{ exitCode: number; isStdoutTruncated: boolean }> = {}) => ({
   exitCode: 0,

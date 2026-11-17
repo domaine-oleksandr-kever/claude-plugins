@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { digestText, notesTail, parseProgress } from '../core/progress-parse.ts'
-import { isWorkId, keyFromBranch, keyFromText, projectOf, slugFromBranch, ticketKeys } from '../core/workid.ts'
+import { digestText, notesTail, parseProgress } from '../core/progress-parse'
+import { isWorkId, keyFromBranch, keyFromText, projectOf, slugFromBranch, ticketKeys } from '../core/workid'
 
 describe('work id', () => {
   test('keyFromBranch', () => {

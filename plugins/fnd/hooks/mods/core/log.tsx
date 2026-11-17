@@ -4,7 +4,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { FndBandInfo, FndEvent, FndForeignEvent } from '../../../types'
-import { LOG_PANE, MOVED, PREFIX_COLS, bandLive, hhmm, kindCell, merged, newestFitting } from './events.ts'
+import { LOG_PANE, MOVED, PREFIX_COLS, bandLive, hhmm, kindCell, merged, newestFitting } from './events'
 
 const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
 const slimEvents = atom({ plugin: 'slim', key: 'events' } as const, [] as FndForeignEvent[])

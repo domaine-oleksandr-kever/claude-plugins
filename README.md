@@ -952,7 +952,7 @@ advisory and never stop a workflow.
 
 ## Releasing — one command stamps every version
 
-Current release: **fnd v0.135.0**.
+Current release: **fnd v0.135.1**.
 
 Several per-host packaging files carry a copy of the version. If one stamp drifts, a host can
 read it as "nothing to update". One script owns all of them. Run it instead of editing any

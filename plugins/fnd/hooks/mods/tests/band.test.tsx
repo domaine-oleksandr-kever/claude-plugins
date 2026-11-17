@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { CRIT, cells, glyphText } from '../core/lib.ts'
+import { CRIT, cells, glyphText } from '../core/lib'
 
 const MIN = 60_000
 const T0 = 1_700_000_000_000
@@ -35,7 +35,7 @@ function world(on: On, store: Record<string, unknown> = {}, env: Record<string, 
   mock.env(on, env)
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('session.usage', async () => ({ value: { startedAt: T0, context: w.context, rateLimits: w.rateLimits, cost: w.cost } }))
-  on('session.model', async () => ({ value: w.model }))
+  on('session.model', async () => ({ value: w.model }) as never)
   on('session.measure', async (_$, e) => ({ changed: e.changed }))
   on('session.compact', async () => (await w.compact()) as never)
   on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))
@@ -46,7 +46,7 @@ function world(on: On, store: Record<string, unknown> = {}, env: Record<string, 
     w.toasts.push(e.text)
     return { value: undefined }
   })
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
+  on('ui.render', { component: 'AbovePrompt', plugin: 'fnd' }, async ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine band</Text>
   })
@@ -352,7 +352,7 @@ describe('band', () => {
       ])
       const rates = (await unitsOf(ui)).filter(u => /^(5h|7d|7d·fable) \d+%$/.test(u.text))
       expect(rates.map(u => u.text)).toEqual(['5h 61%', '7d 34%', '7d·fable 12%'])
-      expect(rates[0].node.props).toMatchObject({ color: 'warning', bold: true })
+      expect(rates[0]!.node.props).toMatchObject({ color: 'warning', bold: true })
     })
 
     test(`${surface}: main turn + 18 min with a 1 h TTL → 42m; +59 → CRIT; +61 → cold`, { options: { cacheTtl: '1h' } }, async ($, on) => {
@@ -955,7 +955,7 @@ describe('band', () => {
     w.rateLimits = [{ kind: 'five_hour', percentUsed: 61 }]
     await start($, 'desktop')
     await mount($, 'desktop', { bodyColumns: 77 })
-    const { text } = await $.command.run({ command: 'fnd-band', args: '' })
+    const { text } = await $.command.run({ command: 'fnd-band', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
     expect(text).toContain('usage(): {"startedAt":')
     expect(text).toContain('"rateLimits":[{"kind":"five_hour","percentUsed":61}]')
     expect(text).toContain('"costUsd":null')
@@ -972,7 +972,7 @@ describe('band', () => {
     const ui = await mount($, 'terminal')
     await measure($, { window: 200_000, percent: 47 }, [{ kind: 'five_hour', percentUsed: 61 }], { usd: 139.14 })
     expect(await textOf(ui, /^cost /)).toBeUndefined()
-    expect((await $.command.run({ command: 'fnd-band', args: '' })).text).toContain('"costUsd":null')
+    expect((await $.command.run({ command: 'fnd-band', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })).text).toContain('"costUsd":null')
   })
 })
 

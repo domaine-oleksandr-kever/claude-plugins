@@ -4,9 +4,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { FndBandInfo, FndEvent, FndProgress } from '../../../types'
-import { LOG_COMMAND, MOVED, bandLive, pushEvent } from './events.ts'
-import { notesTail, parseProgress } from './progress-parse.ts'
-import { KEY, isWorkId, keyFromBranch, projectOf, slugFromBranch, ticketKeys } from './workid.ts'
+import { LOG_COMMAND, MOVED, bandLive, pushEvent } from './events'
+import { notesTail, parseProgress } from './progress-parse'
+import { KEY, isWorkId, keyFromBranch, projectOf, slugFromBranch, ticketKeys } from './workid'
 
 const PANE = 'fnd-progress'
 const COMMAND = {

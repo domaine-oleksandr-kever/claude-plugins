@@ -6,7 +6,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { FndBandInfo } from '../../../types'
-import { bandLive } from '../core/events.ts'
+import { bandLive } from '../core/events'
 
 type $ = EngineInterface
 
