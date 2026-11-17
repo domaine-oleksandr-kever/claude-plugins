@@ -218,12 +218,35 @@ describe('usage endpoint windows', () => {
     ])
   })
 
-  test('mergeRates: the measured windows lead and win their kind; the endpoint adds the rest in its order', () => {
-    const measured = toRates([{ kind: 'seven_day', percentUsed: 30 }, { kind: 'five_hour', percentUsed: 70 }])
-    const endpoint = toRates([{ kind: 'five_hour', percentUsed: 61 }, { kind: 'seven_day_fable', percentUsed: 12 }, { kind: 'seven_day', percentUsed: 34 }])
-    expect(mergeRates(measured, endpoint).map(r => `${r.kind} ${r.pct}`)).toEqual(['seven_day 30', 'five_hour 70', 'seven_day_fable 12'])
-    expect(mergeRates([], endpoint)).toEqual(endpoint)
-    expect(mergeRates(measured, [])).toEqual(measured)
+  test('mergeRates: the measured windows win their kind; the row reads 5h, 7d, the per-model weekly windows, then the rest', () => {
+    const measured = toRates([{ kind: 'seven_day', percentUsed: 30 }, { kind: 'spend_limit', percentUsed: 5 }, { kind: 'five_hour', percentUsed: 70 }])
+    const endpoint = toRates([
+      { kind: 'seven_day_sonnet', percentUsed: 3 },
+      { kind: 'five_hour', percentUsed: 61 },
+      { kind: 'seven_day_fable', percentUsed: 12 },
+      { kind: 'seven_day', percentUsed: 34 },
+      { kind: 'other', percentUsed: 1 },
+    ])
+    expect(mergeRates(measured, endpoint).map(r => `${r.kind} ${r.pct}`)).toEqual([
+      'five_hour 70',
+      'seven_day 30',
+      'seven_day_sonnet 3',
+      'seven_day_fable 12',
+      'spend_limit 5',
+      'other 1',
+    ])
+    expect(mergeRates([], endpoint).map(r => r.kind)).toEqual(['five_hour', 'seven_day', 'seven_day_sonnet', 'seven_day_fable', 'other'])
+    expect(mergeRates(measured, []).map(r => r.kind)).toEqual(['five_hour', 'seven_day', 'spend_limit'])
+  })
+
+  test('mergeRates: 5h drawn first keeps the weekly windows sharing one reset mark', () => {
+    const NOW = Date.parse('2026-11-17T12:00:00Z')
+    const W = '2026-11-18T18:00:00Z'
+    const measured = toRates([{ kind: 'seven_day', percentUsed: 48, resetsAt: W }, { kind: 'five_hour', percentUsed: 0 }])
+    const endpoint = toRates([{ kind: 'seven_day_fable', percentUsed: 51, resetsAt: W }])
+    const rates = mergeRates(measured, endpoint)
+    const resets = groupResets(rates, NOW)
+    expect(rates.map((r, i) => rateText(r, resets[i])).join(' · ')).toBe('5h 0% · 7d 48% · 7d·fable 51% ↻1d6h')
   })
 })
 

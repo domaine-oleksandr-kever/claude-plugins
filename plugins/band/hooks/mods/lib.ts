@@ -139,10 +139,15 @@ export function endpointRates(json: unknown): RawRate[] {
   return out
 }
 
-/** The host's measured windows in their order (its live reading wins a kind), then the endpoint's other windows. */
+const rateRank = (kind: string): number => (kind === 'five_hour' ? 0 : kind === 'seven_day' ? 1 : kind.startsWith('seven_day_') ? 2 : 3)
+
+/**
+ * The host's measured windows (its live reading wins a kind) and the endpoint's other windows, in row order:
+ * `5h`, `7d`, the per-model weekly `7d·…` windows, then every other kind; within a rank, measured first, each list in its order.
+ */
 export function mergeRates(measured: readonly BandRate[], endpoint: readonly BandRate[]): BandRate[] {
   const kinds = new Set(measured.map(r => r.kind))
-  return [...measured, ...endpoint.filter(r => !kinds.has(r.kind))]
+  return [...measured, ...endpoint.filter(r => !kinds.has(r.kind))].sort((a, b) => rateRank(a.kind) - rateRank(b.kind))
 }
 
 /** ` ↻2h05m` after a rate's percentage; empty without a reset time. */

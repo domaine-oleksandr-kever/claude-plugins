@@ -672,6 +672,14 @@ describe('the claude.ai usage endpoint', () => {
     ])
   })
 
+  test('a measurement listing 7d before 5h still draws 5h first, the per-model weekly windows after 7d', async ($, on) => {
+    const { w } = world(on)
+    w.auth = BEARER
+    await start($)
+    await measure($, CTX, [{ kind: 'seven_day', percentUsed: 48 }, { kind: 'five_hour', percentUsed: 0 }])
+    expect(await rates($)).toEqual(['5h 0', '7d 48', '7d·sonnet 5', '7d·fable 12'])
+  })
+
   test('the desktop measures no window: the endpoint supplies every one, and they mean a subscription', async ($, on) => {
     const { w } = world(on, {}, { ANTHROPIC_API_KEY: '' })
     w.auth = BEARER
