@@ -36,7 +36,7 @@ Acceptance Criteria.
 - **STEP 0 — inspect before creating:** query the existing metaobject/metafield
   definitions, diff against the doc's data model, plan create/wire/mock/bind only for
   the gap.
-- **Verify contract (data-driven AC):** snapshot → mutate → reload → verify (**DOM, not
+- **Verify contract (data-driven AC):** snapshot → mutate → reload (full preview URL) → verify (**DOM, not
   the visual**) → **restore**; walk every enumerated/optional/conditional value an AC
   names; mind **propagation lag** — re-query after mutating, retry briefly before calling
   a bug.
@@ -236,10 +236,10 @@ on the metafield/metaobject value** — one default render doesn't prove them. D
 a mutation, verify, then restore:
 
 - **Enumerated options** (e.g. *"media area supports 4:3 / 1:1"*): verify the default, then
-  `metaobjectUpdate` / `metafieldsSet` the field to each other value (`1:1`), reload, confirm the UI
+  `metaobjectUpdate` / `metafieldsSet` the field to each other value (`1:1`), reload (full preview URL), confirm the UI
   reflects it.
 - **Optional / presence-conditional fields** (e.g. *"heading, body, secondary CTA are all optional;
-  an unconfigured element shows no empty placeholder"*): clear the field, reload, and **inspect the
+  an unconfigured element shows no empty placeholder"*): clear the field, reload (full preview URL), and **inspect the
   DOM** — confirm the element is genuinely absent, not just visually empty. Repeat per optional
   element.
 - Walk **every** enumerated/optional/conditional value an AC names; don't assume a state you didn't
@@ -247,8 +247,8 @@ a mutation, verify, then restore:
 
 **Propagation lag:** Shopify can serve a **stale value** for a short window after a mutation. After
 mutating, **re-query the value** (a quick read via `shopify-admin-gql.sh`) to confirm it actually
-changed, then hard-reload (cache-bust) the storefront. If the UI still shows the old value, wait
-briefly and retry **before** concluding the code is wrong — distinguish "not yet propagated" from a
+changed, then hard-reload (cache-bust, full preview URL) the storefront. If the UI still shows the
+old value, wait briefly and retry **before** concluding the code is wrong — distinguish "not yet propagated" from a
 real bug. Leave the data in a known state (restore defaults or note what you left set) so QA starts
 clean.
 

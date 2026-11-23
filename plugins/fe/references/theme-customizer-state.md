@@ -141,11 +141,11 @@ against, or a preview/sandbox theme. Then:
    `error=verify_read_failed` (also exit 6) = the state is unconfirmed — `get` before assuming
    either outcome. On a host with no working `perl` the compare degrades to raw bytes and a
    difference is `verified=unverified` + exit 0: confirming is yours.
-4. **Verify the render**: reload the page (running dev server → `127.0.0.1:9292`; otherwise the
-   theme preview URL). Ignored paths render from the **remote** theme, so the upserted JSON is
-   what the dev server shows. Step 3 already proved the file on the theme, so a stale UI is
-   propagation/caching, not a lost write: hard-reload and retry briefly before calling it a bug —
-   same discipline as metafields.
+4. **Verify the render**: on a running dev server reload `127.0.0.1:9292`; otherwise reload (full
+   preview URL) per base's `browser` convention. Ignored paths render from the **remote**
+   theme, so the upserted JSON is what the dev server shows. Step 3 already proved the file on the
+   theme, so a stale UI is propagation/caching, not a lost write: hard-reload (full preview URL) and
+   retry briefly before calling it a bug — same discipline as metafields.
 5. **Restore** the snapshot (`set --from "$TMP/product.pristine.json"`), `get` once more to
    confirm — the raw pristine restores **byte-exact** (banner included, not duplicated) — and say
    so in your report. The theme must end exactly as you found it — one exception: on this work stream's

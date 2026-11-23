@@ -127,7 +127,7 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    `warn=build_dirtied=` per the reading section (its `notes.md` line too). If a
    `preview_path` is known, also give the page-deep-linked preview and the editor-on-template
    link (**Page deep-links**); path or template unknown → **ask, never guess**. Opening the
-   storefront yourself: `<base root>/references/storefront-login.md`; stale CSS after a refresh,
+   storefront yourself: `<base root>/references/storefront-login.md` and base's `browser` convention (`<base root>/references/browser-sessions.md`); stale CSS after a refresh,
    a templates-only push, local HTML in the Playwright sandbox:
    `<fe root>/references/theme-gotchas.md` → Preview themes.
 6. **Record it as the work stream's session theme.** When a task workspace for this work-id

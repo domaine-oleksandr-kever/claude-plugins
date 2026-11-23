@@ -29,7 +29,7 @@ its brief says otherwise.
    `theme-customizer-state.md`, and — **on a `foundation` profile only** —
    `section-css-variables-pattern.md`, `eslint-no-restricted-syntax.md` (both describe
    Foundation's Tailwind + `core-*` wiring; off `foundation` they do not apply).
-   In-browser validation vs design + AC (Chrome DevTools MCP) — a diff that touches markup, CSS or
+   In-browser validation vs design + AC (Chrome DevTools MCP; base's `browser` convention: `<base root>/references/browser-sessions.md`) — a diff that touches markup, CSS or
    theme JSON adds the responsive sweep (`<base root>/references/responsive-sweep.md`; its table or
    `sweep: not run — <reason>` in the report, each other store using the section `not checked`), data/customizer state walks
    via the runners, `git add` every new file, test
@@ -68,7 +68,7 @@ its brief says otherwise.
    creates a replacement theme on its own. **No `--pin-toml` here** — this phase is past the ✋
    and rewriting the developer's `shopify.theme.toml` unasked is the Step 0 gate's call, not an
    autonomous phase's; the pin is re-asserted by the Step 0 gate on the next entry. Never simulate a
-   logged-in state on the dev server; evidence per row; a diff that touches markup, CSS or theme
+   logged-in state on the dev server; browser rows per base's `browser` convention (`<base root>/references/browser-sessions.md`); evidence per row; a diff that touches markup, CSS or theme
    JSON → the responsive sweep on each surface (`<base root>/references/responsive-sweep.md`), its
    table or `sweep: not run — <reason>` in the report, each other store using the section
    `not checked`; append the pass/fail report + findings with exact
