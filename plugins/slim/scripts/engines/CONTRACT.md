@@ -259,9 +259,27 @@ length: a -/+ pair over 1,024 B (an overlong line pairs with the line across its
 shares the longest common prefix plus suffix with it, not the one at the same position) keeps 160 B of the pair's common prefix and suffix around the
 fragment that changed (the fragment itself capped at 1,024 B), an unpaired overlong body line keeps
 its first and last 512 B, each cut an inline `[slim: <bytes> B hidden]`; file and hunk headers stay.
+A line is hunk body only while its hunk's `@@ -a,b +c,d @@` counts are open (an omitted count is 1;
+a combined diff's `@@@` counts each parent and reads a two-column prefix; `\ No newline at end of
+file` counts against neither side and never splits a -/+ block; an `@@` line whose counts do not parse keeps its hunk open until
+the next `diff`/`@@` line), so a `git log -p` commit header and its indented message after a file's
+last hunk are prose, never context.
 A diff still over budget then loses whole runs of unchanged context, largest first, each run one
-`[slim: <hidden> of <total> lines hidden (<bytes> B)]` line; only a diff whose headers and changed
-lines alone overflow falls back to the head/tail window. `window` counts every cut.
+`[slim: <hidden> of <total> lines hidden (<bytes> B)]` line. Only when headers, prose and changed
+lines alone overflow does the ranked window apply. It starts from everything hidden and keeps whole
+lines by rank, each rank in document order up to its first line that does not fit: (1) a `commit
+<sha>` line and its subject (the first indented message line), (2) a `diff …` line, (3) every other
+line outside a hunk — `mode`, `rename`/`copy`, `similarity index`, `Binary files`, `Author:`,
+`Date:`, the message body, `--stat` lines — then (4) `index`/`---`/`+++`. These ranks take at most
+three quarters of `budgetBytes`; then the hunks (hunk headers, changed lines, context markers) keep
+a head of up to a third of what is left and a tail of the rest; then the ranks above take any room
+still free. What gives way first is the hunks' middle, then `index`/`---`/`+++`, then commit text,
+then the `diff` lines of the last files, then the last commits: a `git log -p` keeps its commit list
+before its files, a multi-file diff its file list before its changed lines. Each hidden stretch
+between kept lines is one marker (a stretch no longer than its marker stays; adjacent markers
+merge), every marker counts original lines and bytes, and the output never exceeds `budgetBytes`
+once that holds one marker line. Any line over 1,024 B keeps its first and last 512 B. A diff never
+takes the character window. `window` counts every cut.
 
 **a11y** — a Playwright or Chrome DevTools MCP accessibility snapshot in its own grammar, the lines
 around the tree kept verbatim. A nameless, ref-less `generic`/`none` wrapper is flattened into its

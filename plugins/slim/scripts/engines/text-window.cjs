@@ -9,7 +9,9 @@
  * less than half the budget fall back to a character window with `[slim: <hiddenBytes> B hidden]`.
  * A diff (sniff's `diff` guard) is first cut inside its overlong body lines — a -/+ pair to a window
  * around the fragment that changed, inline `[slim: <bytes> B hidden]` — then loses whole runs of
- * unchanged context (one `lines hidden` marker per run) before the head/tail window above applies.
+ * unchanged context (one `lines hidden` marker per run), then a ranked window: commits and subjects,
+ * `diff` lines, other headers and commit text, then a head/tail of the hunks (one marker per hidden
+ * stretch). A diff never takes the character window.
  * Pure: no I/O.
  */
 'use strict';
@@ -87,51 +89,99 @@ function pairWindow(a, b, cutA, cutB) {
   return [one(a, cutA), one(b, cutB)];
 }
 
-// A diff over budget: overlong body lines cut in place, then context runs hidden largest first,
-// then a head/tail window. Every marker counts original lines and bytes out of the original total.
+// Window ranks, kept in this order when a diff is over budget: a commit line and its subject, a
+// `diff` line, other file headers and commit text, `index`/`---`/`+++`, then the hunks themselves.
+const RANK_COMMIT = 0;
+const RANK_DIFF = 1;
+const RANK_PROSE = 2;
+const RANK_PATHS = 3;
+const RANK_BODY = 4;
+const PATHS = /^(?:index [0-9a-f]|--- |\+\+\+ )/;
+const HUNK = /^(@{2,}) ((?:-\d+(?:,\d+)? )+)\+\d+(?:,(\d+))? \1/;
+
+// Per line: kind ('h' header or prose, ' ' context, '-'/'+' changed, '\\' a no-newline note), the width
+// of its body prefix, and its window rank. A line is hunk body only while its hunk's @@ counts are
+// open, so a commit header or message after a file's last hunk is prose, not context.
+function classify(lines) {
+  const kind = [];
+  const width = [];
+  const rank = [];
+  let open = null; // { n: parents, old: lines left per parent, add: new lines left }
+  let subject = false;
+  const push = (k, w, r) => { kind.push(k); width.push(w); rank.push(r); };
+  for (const l of lines) {
+    if (l.startsWith('@@')) {
+      const m = HUNK.exec(l);
+      const olds = m ? m[2].trim().split(' ').map((r) => (r.includes(',') ? Number(r.split(',')[1]) : 1)) : [];
+      // An @@ line whose counts do not parse keeps the hunk open until the next diff or @@ line.
+      open = m && olds.length === m[1].length - 1
+        ? { n: olds.length, old: olds, add: m[3] === undefined ? 1 : Number(m[3]) }
+        : { n: 1, old: [Infinity], add: Infinity };
+      if (open.add <= 0 && open.old.every((x) => x <= 0)) open = null;
+      push('h', 0, RANK_BODY);
+      subject = false;
+      continue;
+    }
+    if (l.startsWith('diff ')) open = null;
+    if (l[0] === '\\') { push('\\', 0, RANK_BODY); continue; }
+    const p = open && (l === '' ? ' '.repeat(open.n) : l.slice(0, open.n));
+    if (p && p.length === open.n && /^[ +-]+$/.test(p)) {
+      push(p.includes('-') ? '-' : p.includes('+') ? '+' : ' ', l === '' ? 0 : open.n, RANK_BODY);
+      if (!p.includes('-')) open.add--;
+      for (let i = 0; i < open.n; i++) if (p[i] !== '+') open.old[i]--;
+      if (open.add <= 0 && open.old.every((x) => x <= 0)) open = null;
+      continue;
+    }
+    if (open) { push('h', 0, RANK_BODY); continue; }
+    const commit = /^commit [0-9a-f]{7,}/.test(l);
+    const subj = subject && /^ {4}\S/.test(l);
+    if (commit || l.startsWith('diff ') || subj) subject = commit;
+    push('h', 0, commit || subj ? RANK_COMMIT : l.startsWith('diff ') ? RANK_DIFF : PATHS.test(l) ? RANK_PATHS : RANK_PROSE);
+  }
+  return { kind, width, rank };
+}
+
+// A diff over budget: overlong lines cut in place, then context runs hidden largest first, then the
+// ranked window. Every marker counts original lines and bytes out of the original total.
 function diffWindow(text, budget) {
   const lines = text.split('\n');
-  const kind = [];
-  let inHunk = false;
-  for (const l of lines) {
-    if (l.startsWith('diff ')) inHunk = false;
-    if (l.startsWith('@@')) { inHunk = true; kind.push('h'); continue; }
-    kind.push(!inHunk ? 'h' : l[0] === '-' || l[0] === '+' ? l[0] : l[0] === ' ' || l === '' ? ' ' : 'h');
-  }
+  const { kind, width, rank } = classify(lines);
   const out = lines.slice();
   const cuts = lines.map(() => ({ bytes: 0 }));
   const paired = new Set();
   for (let i = 0; i < out.length; i++) {
     if (kind[i] !== '-') continue;
     let j = i;
-    while (j < out.length && kind[j] === '-') j++;
+    while (j < out.length && (kind[j] === '-' || kind[j] === '\\')) j++;
     let k = j;
-    while (k < out.length && kind[k] === '+') k++;
+    while (k < out.length && (kind[k] === '+' || kind[k] === '\\')) k++;
     // An overlong line pairs with the line across the block that shares the most prefix + suffix with it.
     const cands = [];
     for (let x = i; x < j; x++) {
       for (let y = j; y < k; y++) {
-        if (utf8(out[x]) <= LINE_CAP && utf8(out[y]) <= LINE_CAP) continue;
-        const [p, q] = common(out[x].slice(1), out[y].slice(1));
+        if (kind[x] !== '-' || kind[y] !== '+' || (utf8(out[x]) <= LINE_CAP && utf8(out[y]) <= LINE_CAP)) continue;
+        const [p, q] = common(out[x].slice(width[x]), out[y].slice(width[y]));
         if (p + q > 0) cands.push({ x, y, score: p + q });
       }
     }
     cands.sort((u, v) => v.score - u.score);
     for (const { x, y } of cands) {
       if (paired.has(x) || paired.has(y)) continue;
-      const [wa, wb] = pairWindow(out[x].slice(1), out[y].slice(1), cuts[x], cuts[y]);
-      out[x] = `-${wa}`;
-      out[y] = `+${wb}`;
+      const [wa, wb] = pairWindow(out[x].slice(width[x]), out[y].slice(width[y]), cuts[x], cuts[y]);
+      out[x] = out[x].slice(0, width[x]) + wa;
+      out[y] = out[y].slice(0, width[y]) + wb;
       paired.add(x).add(y);
     }
     i = k - 1;
   }
   for (let i = 0; i < out.length; i++) {
-    if (kind[i] !== 'h' && !paired.has(i) && utf8(out[i]) > LINE_CAP) out[i] = out[i][0] + squeeze(out[i].slice(1), LINE_CAP / 2, cuts[i]);
+    if (!paired.has(i) && utf8(out[i]) > LINE_CAP) {
+      out[i] = out[i].slice(0, width[i]) + squeeze(out[i].slice(width[i]), LINE_CAP / 2, cuts[i]);
+    }
   }
   const mark = (n, b) => `[slim: ${commas(n)} of ${commas(lines.length)} lines hidden (${commas(b)} B)]`;
   // parts: what is printed, with the original lines and bytes it stands for; `hid` marks a marker.
-  let parts = out.map((t, i) => ({ text: t, lines: 1, bytes: utf8(lines[i]) + 1, cut: cuts[i].bytes, hid: false }));
+  let parts = out.map((t, i) => ({ text: t, lines: 1, bytes: utf8(lines[i]) + 1, cut: cuts[i].bytes, hid: false, rank: rank[i] }));
   const size = (arr) => arr.reduce((n, p) => n + utf8(p.text) + 1, 0) - 1;
   let total = size(parts);
   const runs = [];
@@ -153,35 +203,72 @@ function diffWindow(text, budget) {
     total += utf8(marker) + 1 - r.now;
   }
   hide.sort((x, y) => y.i - x.i);
-  for (const r of hide) parts.splice(r.i, r.j - r.i, { text: r.marker, lines: r.j - r.i, bytes: r.bytes, cut: 0, hid: true });
-  let fallback = null;
-  if (total > budget) {
-    const headBudget = Math.floor(budget / 3);
-    let headBytes = 0;
-    let h = 0;
-    while (h < parts.length && headBytes + utf8(parts[h].text) + 1 <= headBudget) headBytes += utf8(parts[h++].text) + 1;
-    const tailBudget = budget - headBytes - MARKER_RESERVE;
-    let tailBytes = 0;
-    let t = parts.length;
-    while (t - 1 > h && tailBytes + utf8(parts[t - 1].text) + 1 <= tailBudget) tailBytes += utf8(parts[--t].text) + 1;
-    if (h === 0 || t === parts.length || headBytes + tailBytes < budget / 2) {
-      fallback = charWindow(parts.map((p) => p.text).join('\n'), budget);
-    } else {
-      const mid = parts.slice(h, t);
-      const n = mid.reduce((x, p) => x + p.lines, 0);
-      const b = mid.reduce((x, p) => x + p.bytes, 0);
-      parts = [...parts.slice(0, h), { text: mark(n, b), lines: n, bytes: b, cut: 0, hid: true }, ...parts.slice(t)];
-    }
-  }
+  const merged = (span) => ({ text: mark(span.reduce((x, p) => x + p.lines, 0), span.reduce((x, p) => x + p.bytes, 0)),
+    lines: span.reduce((x, p) => x + p.lines, 0), bytes: span.reduce((x, p) => x + p.bytes, 0), cut: 0, hid: true, rank: RANK_BODY });
+  for (const r of hide) parts.splice(r.i, r.j - r.i, merged(parts.slice(r.i, r.j)));
+  if (total > budget) parts = rankedWindow(parts, budget, mark, merged);
   const hidden = parts.filter((p) => p.hid);
   return {
-    text: fallback ? fallback.text : parts.map((p) => p.text).join('\n'),
+    text: parts.map((p) => p.text).join('\n'),
     window: {
       lines_total: lines.length,
       lines_hidden: hidden.reduce((x, p) => x + p.lines, 0),
-      bytes_hidden: parts.reduce((x, p) => x + (p.hid ? p.bytes : p.cut), 0) + (fallback ? fallback.window.bytes_hidden : 0),
+      bytes_hidden: parts.reduce((x, p) => x + (p.hid ? p.bytes : p.cut), 0),
     },
   };
+}
+
+// The ranked window of a diff, never over `budget` once it holds one marker: everything starts hidden,
+// then whole parts are kept by rank, each rank in document order up to its first part that does not
+// fit — ranks above the body up to three quarters of the budget, then the body's head up to a third
+// of what is left and its tail the rest, then the ranks above the body again. Each hidden stretch
+// between kept parts is one marker, unless it is no longer than its marker; adjacent markers merge.
+function rankedWindow(parts, budget, mark, merged) {
+  const n = parts.length;
+  const pre = { size: [0], lines: [0], bytes: [0] };
+  for (const p of parts) {
+    pre.size.push(pre.size[pre.size.length - 1] + utf8(p.text) + 1);
+    pre.lines.push(pre.lines[pre.lines.length - 1] + p.lines);
+    pre.bytes.push(pre.bytes[pre.bytes.length - 1] + p.bytes);
+  }
+  const raw = (a, b) => pre.size[b] - pre.size[a];
+  const marker = (a, b) => (b - a === 1 && parts[a].hid ? Infinity : utf8(mark(pre.lines[b] - pre.lines[a], pre.bytes[b] - pre.bytes[a])) + 1);
+  const gap = (a, b) => (a >= b ? 0 : Math.min(raw(a, b), marker(a, b)));
+  // Sizes count a newline after every line, so the limit is budget + 1.
+  const kept = [];
+  let total = gap(0, n);
+  const keep = (k, limit) => {
+    let lo = 0;
+    let hi = kept.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (kept[m] < k) lo = m + 1; else hi = m; }
+    if (kept[lo] === k) return true;
+    const a = lo ? kept[lo - 1] + 1 : 0;
+    const b = lo < kept.length ? kept[lo] : n;
+    const d = gap(a, k) + raw(k, k + 1) + gap(k + 1, b) - gap(a, b);
+    if (total + d > limit) return false;
+    kept.splice(lo, 0, k);
+    total += d;
+    return true;
+  };
+  const byRank = Array.from({ length: RANK_BODY + 1 }, () => []);
+  parts.forEach((p, i) => byRank[p.rank].push(i));
+  const skeleton = (limit) => {
+    for (let r = 0; r < RANK_BODY; r++) for (const i of byRank[r]) if (!keep(i, limit)) break;
+  };
+  skeleton(Math.floor(budget * 3 / 4) + 1);
+  const headCap = total + Math.floor((budget + 1 - total) / 3);
+  for (const i of byRank[RANK_BODY]) if (!keep(i, headCap)) break;
+  for (const i of byRank[RANK_BODY].slice().reverse()) if (!keep(i, budget + 1)) break;
+  skeleton(budget + 1);
+  const res = [];
+  const put = (p) => res.push(p.hid && res.length && res[res.length - 1].hid ? merged([res.pop(), p]) : p);
+  let a = 0;
+  for (const k of [...kept, n]) {
+    if (k > a) (raw(a, k) <= marker(a, k) ? parts.slice(a, k) : [merged(parts.slice(a, k))]).forEach(put);
+    if (k < n) put(parts[k]);
+    a = k + 1;
+  }
+  return res;
 }
 
 // → { text, window:{lines_total, lines_hidden, bytes_hidden} }, or null when `text` already fits.
@@ -216,4 +303,4 @@ function run(text, opts) {
   return { decision: 'compressed', text: w.text, stages: ['window'], window: w.window };
 }
 
-module.exports = { id: 'text', run, windowText, DEFAULT_BUDGET };
+module.exports = { id: 'text', run, windowText, charWindow, DEFAULT_BUDGET };

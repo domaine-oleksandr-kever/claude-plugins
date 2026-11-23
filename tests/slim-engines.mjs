@@ -305,12 +305,12 @@ function ecRows() {
     eq('EC-diff-under-budget', [compress({ data: d }, O).decision, compress({ data: d }, O).text === d], ['passthrough', true]);
   }
   {
-    const head = ['diff --git a/x b/x', 'index 1..2 100644', '--- a/x', '+++ b/x', '@@ -1,960 +1,960 @@'];
+    const hdr = (n) => ['diff --git a/x b/x', 'index 1..2 100644', '--- a/x', '+++ b/x', `@@ -1,${n} +1,${n} @@`];
     const ctx = (t, n) => Array.from({ length: n }, (_, i) => `   {%- assign ctx_${t}_${i} = settings.block_${i} | default: 'some value here' -%}`);
     const pairs = (t, n) => Array.from({ length: n }, (_, i) => [`-  {%- render 'card-${t}', size: ${i}, style: 'old' -%}`, `+  {%- render 'card-${t}', size: ${i}, style: 'new' -%}`]).flat();
     const num = (m, re) => Number(m.match(re)[1].replace(/,/g, ''));
-    for (const [name, d] of [['short-pairs', `${[...head, ...ctx('a', 30), ...pairs('x', 900), ...ctx('b', 30)].join('\n')}\n`],
-      ['swallowed-run', [...head, ...ctx('a', 30), ...pairs('x', 450), ...ctx('m', 40), ...pairs('y', 450), ...ctx('b', 30)].join('\n')]]) {
+    for (const [name, d] of [['short-pairs', `${[...hdr(960), ...ctx('a', 30), ...pairs('x', 900), ...ctx('b', 30)].join('\n')}\n`],
+      ['swallowed-run', [...hdr(1000), ...ctx('a', 30), ...pairs('x', 450), ...ctx('m', 40), ...pairs('y', 450), ...ctx('b', 30)].join('\n')]]) {
       const r = compress({ data: d }, O);
       const total = d.split('\n').length;
       const rl = r.text.split('\n');
@@ -321,6 +321,114 @@ function ecRows() {
       eq(`EC-diff-fallback-counts-${name}`, [r.decision, marks.length, marks.every((m) => num(m, / of ([\d,]+) lines/) === total), hidden + vis.length,
         hiddenB + bytes(vis.join('\n')) + 1, r.window.lines_total, r.window.lines_hidden, r.window.bytes_hidden], ['compressed', 3, true, total, bytes(d) + 1, total, hidden, hiddenB]);
     }
+  }
+  {
+    // Every marker names the original total; markers plus visible lines add up to the input, and window agrees.
+    const num = (m, re) => Number(m.match(re)[1].replace(/,/g, ''));
+    const acct = (d, r) => {
+      const rl = r.text.split('\n');
+      const marks = rl.filter((l) => / lines hidden \(/.test(l));
+      const vis = rl.filter((l) => !l.startsWith('[slim: '));
+      const hidden = marks.reduce((n, m) => n + num(m, /^\[slim: ([\d,]+) of/), 0);
+      const hiddenB = marks.reduce((n, m) => n + num(m, /\(([\d,]+) B\)\]$/), 0);
+      const total = d.split('\n').length;
+      return marks.every((m) => num(m, / of ([\d,]+) lines/) === total) && hidden + vis.length === total && hiddenB + bytes(vis.join('\n')) + 1 === bytes(d) + 1
+        && r.window.lines_total === total && r.window.lines_hidden === hidden && r.window.bytes_hidden === hiddenB;
+    };
+    const fileHead = (f) => [`diff --git a/sections/file-${f}.liquid b/sections/file-${f}.liquid`, `index ${'1'.repeat(7)}..${'2'.repeat(7)} 100644`, `--- a/sections/file-${f}.liquid`, `+++ b/sections/file-${f}.liquid`];
+    const logP = (n, ctxN, bodyN = 1) => Array.from({ length: n }, (_, c) => [
+      `commit ${String(c).padStart(4, '0')}${'a'.repeat(36)}`, 'Author: Dev <dev@example.com>', `Date:   Mon Nov ${(c % 28) + 1} 10:00:00 2026 +0200`, '',
+      `    fix(theme): subject number ${c}`, '', ...Array.from({ length: bodyN }, (_, i) => `    Body line ${i} of commit ${c}.`), '',
+      ...fileHead(c), `@@ -1,${2 * ctxN + 1} +1,${2 * ctxN + 1} @@`,
+      ...Array.from({ length: ctxN }, (_, i) => `   {%- assign a_${c}_${i} = settings.block_${i} -%}`), `-  {%- render 'card', size: ${c} -%}`, `+  {%- render 'card', size: ${c + 1} -%}`,
+      ...Array.from({ length: ctxN }, (_, i) => `   {%- assign b_${c}_${i} = settings.block_${i} -%}`), '',
+    ].join('\n')).join('\n');
+    // git log -p: a commit header and its indented message after a file's last hunk are prose, never context.
+    // The message runs outweigh the context runs, so a classifier that read them as context hid them first.
+    const lp = logP(10, 6, 8);
+    const r = compress({ data: lp }, { ...O, plainBytes: 8192, budgetBytes: 8192 });
+    const rl = r.text.split('\n');
+    const keep = lp.split('\n').filter((l) => /^(commit |Author: |Date: |    \S|diff --git |index |--- |\+\+\+ |@@ |[-+]  )/.test(l));
+    check('EC-diff-log-p-messages-kept', r.decision === 'compressed' && bytes(r.text) <= 8192 && keep.every((l) => rl.includes(l)) && /lines hidden/.test(r.text),
+      `${bytes(r.text)} ${keep.filter((l) => !rl.includes(l)).slice(0, 3).join(' | ')}`);
+    check('EC-diff-log-p-accounting', acct(lp, r), JSON.stringify(r.window));
+    // Too big for headers plus changed lines: every commit line and subject stays, then a prefix of the
+    // files, then changed lines from the head and the tail; the output never passes the budget.
+    const prefix = (d, rl, re) => { const all = d.split('\n').filter((l) => re.test(l)); const k = all.filter((l) => rl.includes(l)); return k.length > 0 && k.every((l, i) => l === all[i]) ? k.length : 0; };
+    const tight = logP(30, 2);
+    const r2 = compress({ data: tight }, { ...O, plainBytes: 8192, budgetBytes: 8192 });
+    const rl2 = r2.text.split('\n');
+    check('EC-diff-log-p-tight', r2.decision === 'compressed' && bytes(r2.text) <= 8192 && tight.split('\n').filter((l) => /^(commit |    fix)/.test(l)).every((l) => rl2.includes(l))
+      && prefix(tight, rl2, /^diff --git /) >= 10 && rl2.includes("+  {%- render 'card', size: 1 -%}") && rl2.includes("+  {%- render 'card', size: 30 -%}")
+      && acct(tight, r2), `${bytes(r2.text)} ${JSON.stringify(r2.window)}`);
+    // Real-length paths and subjects: file headers for a few commits alone fill 4 KB, the commits still show.
+    const longP = (c, f) => `plugins/slim/scripts/engines/some-long-module-name-${c}-${f}.cjs`;
+    const real = Array.from({ length: 8 }, (_, c) => [`commit ${String(c).padStart(4, '0')}${'b'.repeat(36)}`, 'Author: Dev <dev@example.com>', 'Date:   Thu Nov 5 20:27:44 2026 +0200', '',
+      `    fix(slim): commit ${c} ${'explains at length what it changed and why it matters to the window '.repeat(3)}`, '',
+      ...Array.from({ length: 3 }, (_, f) => [`diff --git a/${longP(c, f)} b/${longP(c, f)}`, 'index 1111111111..2222222222 100644', `--- a/${longP(c, f)}`, `+++ b/${longP(c, f)}`, '@@ -10,7 +10,7 @@ function x() {',
+        ...Array.from({ length: 3 }, (_, i) => `   const keep_${i} = ${i};`), `-  old(${c}, ${f});`, `+  new(${c}, ${f});`, ...Array.from({ length: 3 }, (_, i) => `   const tail_${i} = ${i};`)]).flat(), ''].join('\n')).join('\n');
+    const r3 = compress({ data: real }, { ...O, plainBytes: 4096, budgetBytes: 4096 });
+    const rl3 = r3.text.split('\n');
+    check('EC-diff-log-p-real-paths', r3.decision === 'compressed' && bytes(r3.text) <= 4096 && real.split('\n').filter((l) => /^(commit |    fix)/.test(l)).every((l) => rl3.includes(l))
+      && rl3[0] === real.split('\n')[0] && prefix(real, rl3, /^diff --git /) >= 1 && acct(real, r3), `${bytes(r3.text)} ${JSON.stringify(r3.window)}`);
+    // A 40-file diff at the persisted 4,096 B budget: the `diff` lines of the first files, changed lines of the
+    // first and last file, never over budget; with room every file header and changed line stays.
+    const files = Array.from({ length: 40 }, (_, f) => [`diff --git a/sections/file-${f}.liquid b/sections/file-${f}.liquid`, `index ${'1'.repeat(7)}..${'2'.repeat(7)} 100644`,
+      `--- a/sections/file-${f}.liquid`, `+++ b/sections/file-${f}.liquid`, '@@ -1,5 +1,5 @@', ' ctx one', ' ctx two', `-old ${f}`, `+new ${f}`, ' ctx three'].join('\n')).join('\n');
+    const diffs = files.split('\n').filter((l) => l.startsWith('diff --git '));
+    for (const [budget, minFiles] of [[4096, 24], [6144, 40]]) {
+      const r = compress({ data: files }, { ...O, plainBytes: budget, budgetBytes: budget });
+      const rl = r.text.split('\n');
+      const marks = rl.filter((l) => / lines hidden \(/.test(l));
+      const vis = rl.filter((l) => !l.startsWith('[slim: '));
+      const kept = diffs.filter((l) => rl.includes(l));
+      eq(`EC-diff-40-files-${budget}`, [r.decision, bytes(r.text) <= budget, kept.length >= minFiles && kept.every((l, i) => l === diffs[i]), rl.includes('+new 0') && rl.includes('+new 39'),
+        vis.every((l) => files.split('\n').includes(l)), marks.reduce((n, m) => n + num(m, /^\[slim: ([\d,]+) of/), 0) + vis.length, r.window.bytes_hidden + bytes(vis.join('\n')) + 1],
+      ['compressed', true, true, true, true, 400, bytes(files) + 1]);
+    }
+    const r8 = compress({ data: files }, { ...O, plainBytes: 8192, budgetBytes: 8192 });
+    check('EC-diff-40-files-8192', bytes(r8.text) <= 8192 && diffs.every((l) => r8.text.split('\n').includes(l)) && files.split('\n').filter((l) => /^[-+](old|new) /.test(l)).every((l) => r8.text.split('\n').includes(l)), `${bytes(r8.text)}`);
+    // File headers that alone overflow the budget: a window, never the input back or an output over budget.
+    const renP = (f) => `src/components/very/long/path/name/for-file-${String(f).padStart(3, '0')}`;
+    for (const [nf, budget] of [[40, 4096], [400, 4096], [400, 12288]]) {
+      const ren = Array.from({ length: nf }, (_, f) => [`diff --git a/${renP(f)}-x.liquid b/${renP(f)}-y.liquid`, 'similarity index 90%', `rename from ${renP(f)}-x.liquid`, `rename to ${renP(f)}-y.liquid`,
+        'index 1111111..2222222 100644', `--- a/${renP(f)}-x.liquid`, `+++ b/${renP(f)}-y.liquid`, '@@ -1,3 +1,3 @@', ' a', `-old ${f}`, `+new ${f}`, ' b'].join('\n')).join('\n');
+      const r = compress({ data: ren }, { ...O, plainBytes: budget, budgetBytes: budget });
+      check(`EC-diff-${nf}-renames-${budget}`, r.decision === 'compressed' && bytes(r.text) <= budget && r.window.lines_hidden > 0 && r.text.startsWith(`diff --git a/${renP(0)}`) && acct(ren, r), `${bytes(r.text)} ${JSON.stringify(r.window)}`);
+    }
+  }
+  {
+    // Omitted counts mean 1; a no-newline note and a zero-count side close the hunk on time.
+    const commits = Array.from({ length: 20 }, (_, c) => [`commit ${String(c).padStart(40, '0')}`, '', `    subject ${c}: keep this message line`, `    second message line of ${c}`, '',
+      `diff --git a/a${c} b/a${c}`, `--- a/a${c}`, `+++ b/a${c}`, `@@ -${c + 1} +${c + 1} @@ section`, `-old ${c}`, `+new ${c}`, '\\ No newline at end of file',
+      `diff --git a/n${c} b/n${c}`, 'new file mode 100644', '--- /dev/null', `+++ b/n${c}`, '@@ -0,0 +1 @@', `+fresh ${c}`, ''].join('\n')).join('\n');
+    const r = compress({ data: commits }, { ...O, plainBytes: 4096, budgetBytes: 4096 });
+    const rl = r.text.split('\n');
+    const vis = rl.filter((l) => !l.startsWith('[slim: '));
+    // A hunk left open would read the next commit line as hunk body, ranked below every commit.
+    const shown = Array.from({ length: 20 }, (_, c) => c).filter((c) => rl.includes(`commit ${String(c).padStart(40, '0')}`) && rl.includes(`    subject ${c}: keep this message line`));
+    check('EC-diff-omitted-counts', r.decision === 'compressed' && bytes(r.text) <= 4096 && vis.every((l) => commits.split('\n').includes(l))
+      && shown.length === 20 && rl.includes('diff --git a/a0 b/a0') && rl.includes('\\ No newline at end of file'), `${bytes(r.text)} ${shown}`);
+  }
+  {
+    // Context lines that read like a commit message are still context inside their hunk's counts.
+    const ctx = (t, n) => Array.from({ length: n }, (_, i) => `    ${t} line ${i} reads like an indented commit message body`);
+    const d = ['diff --git a/NOTES.md b/NOTES.md', 'index 1..2 100644', '--- a/NOTES.md', '+++ b/NOTES.md', '@@ -1,121 +1,121 @@',
+      ...ctx('before', 60).map((l) => ` ${l}`), '-    fix(slim): old subject', '+    fix(slim): new subject', ...ctx('after', 60).map((l) => ` ${l}`)].join('\n');
+    const r = compress({ data: d }, { ...O, plainBytes: 4096, budgetBytes: 4096 });
+    const marks = r.text.split('\n').filter((l) => / lines hidden \(/.test(l));
+    eq('EC-diff-context-like-commit-text', [r.decision, marks.map((m) => m.match(/^\[slim: (\d+) of/)[1]), r.text.includes('-    fix(slim): old subject\n+    fix(slim): new subject')],
+      ['compressed', ['60'], true]);
+  }
+  {
+    // A combined diff: @@@ counts per parent, a two-column prefix, context hidden, changes kept.
+    const d = ['diff --git a/a.js b/a.js', '--- a/a.js', '+++ b/a.js', '@@ -1 +1 @@', '-a', '+b', 'diff --cc cart.js', 'index 1,2..3', '@@@ -1,81 -1,81 +1,82 @@@',
+      ...Array.from({ length: 40 }, (_, i) => `  const keep_${i} = settings.cart_${i} || 'fallback value';`), ' -const a = 1;', '+ const a = 2;', '++const b = 3;',
+      ...Array.from({ length: 40 }, (_, i) => `  const tail_${i} = settings.cart_${i} || 'fallback value';`), 'commit after the hunk closes'].join('\n');
+    const r = compress({ data: d }, { ...O, plainBytes: 2048, budgetBytes: 2048 });
+    const marks = r.text.split('\n').filter((l) => / lines hidden \(/.test(l));
+    eq('EC-diff-combined', [r.decision, marks.map((m) => m.match(/^\[slim: (\d+) of/)[1]), [' -const a = 1;', '+ const a = 2;', '++const b = 3;', 'commit after the hunk closes', 'diff --cc cart.js'].every((l) => r.text.split('\n').includes(l))],
+      ['compressed', ['40', '40'], true]);
   }
   {
     const env = JSON.stringify({ isError: true, content: [{ type: 'text', text: JQL }] });

@@ -670,6 +670,16 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const jest2 = `${TESTOUT}${TESTOUT}`;
   const jp = call('Cb6-jest', T, chEnv(T, 'bash', 'Bash', { command: 'npx jest --ci' }, BASH(jest2.slice(0, 2048), { persistedOutputPath: hostFile(T, 'b3.txt', jest2), persistedOutputSize: bytes(jest2) })));
   check('Cb6-persisted-test-output-windowed', jp.decision === 'compressed' && jp.record.engine === 'text' && bodyOf(jp.result.stdout).includes(TESTOUT.replace(/\n$/, '').split('\n').slice(-3).join('\n')), `${jp.decision} ${jp.reason}`);
+  // A saved 40-file diff at the 4,096 B window: the first files' `diff` lines survive in order, the line count adds up.
+  const diff40 = Array.from({ length: 40 }, (_, f) => [`diff --git a/sections/file-${f}.liquid b/sections/file-${f}.liquid`, 'index 1111111..2222222 100644',
+    `--- a/sections/file-${f}.liquid`, `+++ b/sections/file-${f}.liquid`, '@@ -1,9 +1,9 @@', ...Array.from({ length: 4 }, (_, i) => ` {%- assign ctx_${i} = settings.block_${i} -%}`),
+    `-  {%- render 'card', size: ${f} -%}`, `+  {%- render 'card', size: ${f + 1} -%}`, ...Array.from({ length: 4 }, (_, i) => ` {%- assign end_${i} = settings.block_${i} -%}`)].join('\n')).join('\n');
+  const dp = call('Cb6-diff40', T, chEnv(T, 'bash', 'Bash', { command: 'git diff main' }, BASH(diff40.slice(0, 2048), { persistedOutputPath: hostFile(T, 'b4.txt', diff40), persistedOutputSize: bytes(diff40) })));
+  const dpl = bodyOf((dp.result || {}).stdout || '').split('\n');
+  const dpHidden = dpl.filter((l) => / lines hidden \(/.test(l)).reduce((n, m) => n + Number(m.match(/^\[slim: ([\d,]+) of/)[1].replace(/,/g, '')), 0);
+  const dpDiffs = diff40.split('\n').filter((l) => l.startsWith('diff --git ')).filter((l) => dpl.includes(l));
+  eq('Cb6-persisted-diff-40-files', [dp.decision, dp.record.engine, dpDiffs.length >= 20 && dpDiffs.every((l, i) => l === `diff --git a/sections/file-${i}.liquid b/sections/file-${i}.liquid`),
+    dpHidden + dpl.filter((l) => !l.startsWith('[slim: ')).length, dp.record.window && dp.record.window.lines_hidden === dpHidden], ['compressed', 'text', true, 600, true]);
   for (const cmd of ['cat src/http/page.html', 'cat docs/https-setup.html', 'cat ~/work/http-server/public/index.html']) {
     const x = call('Cb6-path-word', T, chEnv(T, 'bash', 'Bash', { command: cmd }, persistedPage));
     check(`Cb6-path-word-${cmd}`, x.record.engine !== 'html', `${x.decision} ${x.record.engine}`);
@@ -954,6 +964,16 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const d4 = spawn(T2, JSON.stringify({ v: 1, path: path.join(FIX, 'git-diff.txt'), budgetBytes: 8192, cwd: T2, session_id: 's1' }), { args: ['--distill'] });
   check('Cd4-path', JSON.parse(d4.stdout || '{}').bytesOut <= 8192, d4.stdout.slice(0, 120));
   check('Cd5-no-log', !existsSync(path.join(T2, 'spill', LOG)), 'distill logged');
+  // A diff whose file headers alone overflow the budget: the diff window fits, every marker counts original lines.
+  const manyFiles = Array.from({ length: 400 }, (_, f) => [`diff --git a/sections/file-${f}.liquid b/sections/file-${f}.liquid`, 'index 1111111..2222222 100644',
+    `--- a/sections/file-${f}.liquid`, `+++ b/sections/file-${f}.liquid`, '@@ -1 +1 @@', `-old ${f}`, `+new ${f}`].join('\n')).join('\n');
+  const d7 = spawn(T2, JSON.stringify({ v: 1, text: manyFiles, budgetBytes: 8192, cwd: T2, session_id: 's1' }), { args: ['--distill'] });
+  let d7j = null;
+  try { d7j = JSON.parse(d7.stdout); } catch (_) {}
+  const d7l = d7j ? d7j.text.split('\n') : [];
+  const d7Hidden = d7l.filter((l) => /^\[slim: [\d,]+ of 2,800 lines hidden \([\d,]+ B\)\]$/.test(l)).reduce((n, l) => n + Number(l.match(/^\[slim: ([\d,]+)/)[1].replace(/,/g, '')), 0);
+  check('Cd7-diff-headers-over-budget', d7j && d7j.decision === 'compressed' && d7j.bytesOut <= 8192 && d7j.text.startsWith('diff --git a/sections/file-0.liquid')
+    && d7l.every((l) => !/^\[slim: [\d,]+ B hidden\]$/.test(l)) && d7Hidden + d7l.filter((l) => !l.startsWith('[slim: ')).length === 2800, d7.stdout.slice(0, 200));
   // A crush would cite rows by a file distill never writes: the rows come back inline, windowed.
   const d6 = spawn(T2, JSON.stringify({ v: 1, text: ORDERS(240), cwd: T2, session_id: 's1' }), { args: ['--distill'] });
   let d6j = null;
