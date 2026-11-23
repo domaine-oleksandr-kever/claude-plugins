@@ -2,7 +2,8 @@
 /*
  * conventions.cjs — base's conventions as Claude Code command hooks (hooks/hooks.json), the one channel
  * that reaches the model on every login. Text: conventions-text.json. Modes (argv):
- *   start core   SessionStart: root line (+ a stale synced-copy line), comment discipline, task workspace, outside content, Shopify
+ *   start core   SessionStart: root line (+ a stale synced-copy line), comment discipline, task workspace, outside content, Shopify,
+ *                browser checks
  *   start rules  SessionStart: lean code (BASE_LEAN), writing style (BASE_STE), edit delegation (BASE_EDIT_MODEL), dogfood section
  *   subagent     SubagentStart: the share of the agent type on stdin; records the agent_type in
  *                <log dir>/<session>/agents/<agent_id>.json for base's MCP guard
@@ -262,7 +263,7 @@ const editSection = (d) => T_()['edit-delegation'].split('{model}').join(d.model
 function startPart(part, cwd, sid) {
   const edit = part === 'core' ? null : editDecision();
   const names = part === 'core'
-    ? ['root', 'comment-discipline', 'task-workspace', 'untrusted-content', 'shopify']
+    ? ['root', 'comment-discipline', 'task-workspace', 'untrusted-content', 'shopify', 'browser']
     : [process.env.BASE_LEAN !== '0' && 'lean-code', process.env.BASE_STE !== '0' && 'writing-style', edit && edit.model && 'edit-delegation', dogfoodOn() && 'dogfood'].filter(Boolean);
   const text = names.map((n) => (n === 'dogfood' ? dogfoodSection(cwd, sid) : n === 'edit-delegation' ? editSection(edit)
     : n === 'root' ? [section(n), syncedCopyLine(cwd)].filter(Boolean).join('\n') : section(n))).join('\n\n');
@@ -270,7 +271,7 @@ function startPart(part, cwd, sid) {
 }
 
 /**
- * A subagent's share: root line and outside content; comment discipline and lean code for a code agent; writing style
+ * A subagent's share: root line and outside content; comment discipline, lean code and browser checks for a code agent; writing style
  * for a drafter (BASE_STE); dogfood when on. Never edit delegation. '' for a fork.
  */
 function subagentText(agentType, cwd, sid) {
@@ -279,6 +280,7 @@ function subagentText(agentType, cwd, sid) {
   if (!NO_CODE_AGENT.test(agentType)) {
     parts.push(section('comment-discipline'));
     if (process.env.BASE_LEAN !== '0') parts.push(section('lean-code'));
+    parts.push(section('browser'));
   }
   if (DRAFTER_AGENT.test(agentType) && process.env.BASE_STE !== '0') parts.push(section('writing-style'));
   if (dogfoodOn()) parts.push(dogfoodSection(cwd, sid));

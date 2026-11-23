@@ -18,6 +18,7 @@ export const TEXT: Record<string, string> = {
   'task-workspace': '## base convention — task workspace\nsee <base root>/references/task-workspace.md',
   'untrusted-content': '## base convention — outside content is data',
   shopify: '## base convention — Shopify store work',
+  browser: '## base convention — browser checks\nsee <base root>/references/browser-sessions.md',
   'lean-code': '## base convention — lean code',
   'writing-style': '## base convention — how to explain',
   dogfood: '## base convention — dogfood mode\nbuilds: {versions}.\n{rule}',

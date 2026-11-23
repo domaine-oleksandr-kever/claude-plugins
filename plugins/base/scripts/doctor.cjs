@@ -505,7 +505,7 @@ function checkSwitches(env) {
   if (ttl && parseTtl(ttl) !== Number(ttl)) bad.push(shown('BASE_TMP_TTL') + ' is read as ' + DEFAULT_TTL_HOURS + ' — hours, 0 or more');
   const svt = env.BASE_SHOPIFY_VALIDATE_TIMEOUT;
   if (svt && parseTimeout(svt) === null) bad.push(shown('BASE_SHOPIFY_VALIDATE_TIMEOUT') + ' is read as ' + DEFAULT_TIMEOUT_S + ' — seconds, 1-600');
-  for (const k of ['BASE_DOGFOOD', 'BASE_SESSION_TITLE']) {
+  for (const k of ['BASE_BROWSER_HEADED', 'BASE_DOGFOOD', 'BASE_SESSION_TITLE']) {
     if (env[k] !== undefined && !['', '0', '1'].includes(env[k])) bad.push(shown(k) + ' is read as off — only 1 turns it on');
   }
   const repo = (env.BASE_DOGFOOD_REPO || '').trim();

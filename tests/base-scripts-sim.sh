@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Simulation harness for plugins/base/scripts/worktree-setup.sh (the generic worktree: branch, port,
 # shared task workspace, the caller's --copy list) and plugins/base/scripts/scratch-hygiene.cjs (the
-# base-tmp sweep CLI) and plugins/base/scripts/edit-delegation.cjs (the edit-delegation model). Scratch git repos only: `origin` is a local bare repo, npm is a shim, nothing
+# base-tmp sweep CLI) and plugins/base/scripts/edit-delegation.cjs (the edit-delegation model) and
+# plugins/base/scripts/browser-mcp.cjs (the headless browser MCP launcher). Scratch git repos only: `origin` is a local bare repo, npm is a shim, nothing
 # touches the network or the real checkout. Exit 0 = all green.
 set -u
 
@@ -855,6 +856,59 @@ ed_dec ED6-no-plan '{}' "{}" "opus|unknown|default|false|true|login record names
 ed_dec ED6-malformed 'not json' "{}" "opus|unknown|default|false|false|no login record"
 ed_eq ED6-no-args "m.editDelegation().model+'|'+m.editDelegation().kind" "opus|unknown"
 rm -f "$EDR/h/.claude.json"
+
+# ------------------------------------------------------------ browser-mcp.cjs (the browser MCP launcher) --
+# A fake server on PATH stands in for npx: it prints its argv, echoes stdin, exits with $FAKE_RC, or
+# answers a SIGTERM; nothing starts a browser.
+BMC="$ROOT/plugins/base/scripts/browser-mcp.cjs"
+BMR="$TMP/bm"; mkdir -p "$BMR"
+cat > "$BMR/fake-server" <<'SH'
+#!/usr/bin/env bash
+case "${FAKE_MODE:-args}" in
+  args) printf '%s\n' "$*" ;;
+  echo) cat ;;
+  term) trap 'echo got-term > "$FAKE_MARK"; exit 3' TERM; echo ready > "$FAKE_MARK.ready"; while :; do sleep 0.05; done ;;
+  die) kill -"${FAKE_SIG:-TERM}" $$ ;;
+esac
+exit "${FAKE_RC:-0}"
+SH
+chmod +x "$BMR/fake-server"
+bm() { env -u BASE_BROWSER_HEADED "$@" node "$BMC" "$BMR/fake-server" -y pkg@latest --isolated >"$O" 2>"$E" </dev/null; }
+bm_eq() { if [ "$2" = "$3" ]; then ok; else bad "$1" "got [$2] want [$3]"; fi; }
+bm; bm_eq BM1-headless-default "$(cat "$O")|$?" "-y pkg@latest --isolated --headless|0"
+bm BASE_BROWSER_HEADED=1; bm_eq BM2-headed "$(cat "$O")" "-y pkg@latest --isolated"
+for v in true yes 0 ' 1' ''; do
+  bm BASE_BROWSER_HEADED="$v"; bm_eq "BM3-only-1-is-headed-[$v]" "$(cat "$O")" "-y pkg@latest --isolated --headless"
+done
+out="$(printf '{"jsonrpc":"2.0","id":1}\n' | FAKE_MODE=echo node "$BMC" "$BMR/fake-server" 2>"$E")"
+bm_eq BM4-stdio-through "$out" '{"jsonrpc":"2.0","id":1}'
+rc=0; FAKE_RC=7 node "$BMC" "$BMR/fake-server" >/dev/null 2>&1 </dev/null || rc=$?
+bm_eq BM5-exit-code "$rc" 7
+rm -f "$BMR/mark" "$BMR/mark.ready"
+FAKE_MODE=term FAKE_MARK="$BMR/mark" node "$BMC" "$BMR/fake-server" </dev/null >/dev/null 2>&1 &
+bpid=$!; i=0; while [ ! -e "$BMR/mark.ready" ] && [ "$i" -lt 100 ]; do sleep 0.05; i=$((i + 1)); done
+kill -TERM "$bpid"; rc=0; wait "$bpid" || rc=$?
+bm_eq BM6-sigterm-forwarded "$(cat "$BMR/mark" 2>/dev/null)|$rc" "got-term|3"
+rc=0; { FAKE_MODE=die node "$BMC" "$BMR/fake-server" </dev/null >/dev/null; } 2>/dev/null || rc=$?
+bm_eq BM7-child-signal-is-ours "$rc" 143
+# Node ignores SIGPIPE and opens its inspector on SIGUSR1: neither is re-raised, both still end as 128+n.
+for sig in PIPE USR1; do
+  rc=0; { FAKE_MODE=die FAKE_SIG=$sig node "$BMC" "$BMR/fake-server" </dev/null >/dev/null 2>"$E"; } 2>/dev/null || rc=$?
+  bm_eq "BM7-node-owned-signal-[$sig]" "$rc|$(cat "$E")" "$((128 + $(kill -l $sig)))|"
+done
+rc=0; node "$BMC" "$BMR/no-such-server" </dev/null >"$O" 2>"$E" || rc=$?
+bm_eq BM8-missing-command "$rc|$(cat "$E")" "127|browser-mcp: cannot start $BMR/no-such-server (ENOENT)"
+rc=0; node "$BMC" </dev/null >"$O" 2>"$E" || rc=$?
+bm_eq BM9-usage "$rc|$(cat "$E")" "2|browser-mcp: usage: browser-mcp.cjs <command> [args…]"
+bm_eq BM10-module "$(node -e 'const m=require(process.argv[1]);const a=["x"];process.stdout.write([m.serverArgs(a,{}).join(" "),m.serverArgs(a,{BASE_BROWSER_HEADED:"1"}).join(" "),a.length].join("|"))' "$BMC")" "x --headless|x|1"
+# Both browser servers of base's manifest start through the launcher, headless left to it; playwright's profile is in memory.
+bm_eq BM11-manifest "$(node -e '
+  const m = require(process.argv[1]).mcpServers;
+  process.stdout.write(["chrome-devtools-mcp", "playwright"].map((n) => {
+    const s = m[n] || {}, a = s.args || [];
+    return [n, s.command, a[0], a.includes("--isolated"), a.includes("--headless")].join(",");
+  }).join("|"));' "$ROOT/plugins/base/.claude-plugin/plugin.json")" \
+  'chrome-devtools-mcp,node,${CLAUDE_PLUGIN_ROOT}/scripts/browser-mcp.cjs,true,false|playwright,node,${CLAUDE_PLUGIN_ROOT}/scripts/browser-mcp.cjs,true,false'
 
 # The suite never touched the real checkout.
 if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ] \

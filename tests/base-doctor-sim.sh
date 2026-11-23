@@ -5,7 +5,7 @@
 # servers) are the mod's and live in plugins/base/hooks/mods/tests/doctor.test.ts. Exit 0 = all green.
 set -u
 unset CLAUDE_CONFIG_DIR BASE_AUTOSAVE BASE_TMP_TTL DOMAINE_LOG_DIR BASE_EVENT_LOG BASE_GUARD BASE_LEAN BASE_SCRATCH_GUARD \
-  BASE_SESSION_TITLE BASE_STE BASE_FIGMA_SOURCE BASE_DOGFOOD BASE_DOGFOOD_REPO BASE_EDIT_MODEL ANTHROPIC_API_KEY ZDOTDIR
+  BASE_SESSION_TITLE BASE_STE BASE_BROWSER_HEADED BASE_FIGMA_SOURCE BASE_DOGFOOD BASE_DOGFOOD_REPO BASE_EDIT_MODEL ANTHROPIC_API_KEY ZDOTDIR
 export SHELL=/bin/bash
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -282,6 +282,10 @@ rc=0; BASE_SESSION_TITLE=1 node "$DOCTOR" --root "$P" --home "$H" --project "$PR
 expect CD39i-switches-session-title-on 0 "!switches"
 rc=0; BASE_SESSION_TITLE=on node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
 expect CD39j-switches-session-title-invalid 0 'WARN  switches' 'BASE_SESSION_TITLE="on" is read as off — only 1 turns it on'
+rc=0; BASE_BROWSER_HEADED=1 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD39y-switches-browser-headed-on 0 "!switches"
+rc=0; BASE_BROWSER_HEADED=true node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD39z-switches-browser-headed-invalid 0 'WARN  switches' 'BASE_BROWSER_HEADED="true" is read as off — only 1 turns it on'
 rc=0; BASE_SHOPIFY_VALIDATE=0 BASE_SHOPIFY_VALIDATE_TIMEOUT=120 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
 expect CD39g-switches-shopify-validate-valid 0 "!switches"
 rc=0; BASE_SHOPIFY_VALIDATE=no BASE_SHOPIFY_VALIDATE_TIMEOUT=900 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?

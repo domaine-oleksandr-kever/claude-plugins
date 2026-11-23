@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "base",
   "displayName": "Base",
-  "version": "0.25.3",
+  "version": "0.26.0",
   "description": "Shared Domaine plugin for Claude Code: the Jira, Figma and doc readers, the Jira writer and the review agents, the task workspace and the progress it publishes for band, the commit and review guards, the working conventions, a doctor, and the shared MCP servers; reads large results through slim, which it requires",
   "author": {
     "name": "Oleksandr Kever",
@@ -13,8 +13,8 @@
   "types": "./types/index.d.ts",
   "mcpServers": {
     "chrome-devtools-mcp": {
-      "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--isolated"]
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/browser-mcp.cjs", "npx", "-y", "chrome-devtools-mcp@latest", "--isolated"]
     },
     "atlassian": {
       "command": "npx",
@@ -30,8 +30,8 @@
       "url": "http://127.0.0.1:3845/sse"
     },
     "playwright": {
-      "command": "npx",
-      "args": ["@playwright/mcp@latest", "--output-dir", ".claude/base-tmp/playwright"]
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/browser-mcp.cjs", "npx", "@playwright/mcp@latest", "--isolated", "--output-dir", ".claude/base-tmp/playwright"]
     },
     "notion-mcp": {
       "type": "http",

@@ -35,7 +35,7 @@ fields) — the categories are lenses, not a fixed list. Two hard rules:
 Same mechanics as the AC state walks, hostile values. Data-shaped cases ride the two
 state patterns of the calling team plugin (fe's `<fe root>/references/metafield-metaobject-setup.md`
 and `<fe root>/references/theme-customizer-state.md`): mutate the metafield / theme JSON to the hostile
-value → reload → verify → **restore**. Timing cases: throttle the network via Chrome
+value → reload (full preview URL) → verify → **restore**. Timing cases: throttle the network via Chrome
 DevTools MCP (`emulate`), interact before scripts hydrate, fire rapid repeated
 interactions and watch the request log for aborted vs racing requests. A break-it row
 that breaks the feature is a **finding to report** (blocking when it corrupts totals/cart

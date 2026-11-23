@@ -426,5 +426,27 @@ else bad fe-ship-stt-rules-read "pipeline-phases.md's steps-to-test phase does n
 if [ -f "$ROOT/plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js" ]; then ok
 else bad fe-fbc-template "plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js missing"; fi
 
+# base's browser-sessions.md is the one served-theme read; qa's theme gate runs it from there
+BS="$ROOT/plugins/base/references/browser-sessions.md"
+GATE="$ROOT/plugins/qa/skills/preflight/gate.md"
+theme_reads() { grep -rlF 'Shopify.theme.role' "$@" --include='*.md' 2>/dev/null | grep -vxF "$BS"; }
+mkdir -p "$TMP/tr"; printf '```js\n() => ({ role: Shopify.theme.role })\n```\n' > "$TMP/tr/copy.md"
+if [ -n "$(theme_reads "$TMP/tr")" ]; then ok; else bad browser-theme-read-planted "the second-copy check did not fire on a planted snippet"; fi
+hits="$(theme_reads "$ROOT/plugins/base" "$ROOT/plugins/fe" "$ROOT/plugins/qa")"
+if [ -z "$hits" ]; then ok; else bad browser-theme-read-one-copy "a second served-theme snippet: $hits"; fi
+if grep -qF 'shop: Shopify.shop' "$BS" && grep -qF '`<base root>/references/browser-sessions.md` → rule 5' "$GATE"; then ok
+else bad browser-theme-read-shared "browser-sessions.md lacks the { id, role, name, shop } read, or gate.md does not run it from rule 5"; fi
+# a browser reload step in a skill or reference names the full preview URL (or qa's Page URL), never a plain reload
+plain_reloads() {
+  grep -rnE '→ reload →|and reload([^a-z-]|$)|hard-reload|reload the page|Reload after|, reload,' "$@" --include='*.md' 2>/dev/null \
+    | grep -vF "$BS:" | grep -vE 'full preview URL|Page URL'
+}
+printf 'flip the value → reload → verify\n' > "$TMP/tr/reload.md"
+if [ -n "$(plain_reloads "$TMP/tr")" ]; then ok; else bad browser-reload-planted "the plain-reload check did not fire on a planted step"; fi
+dirs=""; for p in base fe qa; do for d in skills references agents; do [ -d "$ROOT/plugins/$p/$d" ] && dirs="$dirs $ROOT/plugins/$p/$d"; done; done
+# shellcheck disable=SC2086
+hits="$(plain_reloads $dirs)"
+if [ -z "$hits" ]; then ok; else bad browser-reload-full-url "$(printf '%s' "$hits" | head -c 800)"; fi
+
 echo "team-refs-lint: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

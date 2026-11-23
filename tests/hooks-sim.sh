@@ -6040,16 +6040,17 @@ for spec in SessionStart:0 SessionStart:1 SubagentStart:0; do
   if [ -n "$(dh_ctx)" ]; then ok; else bad "DH1-$spec-ctx" "no additionalContext: $DH_OUT"; fi
 done
 
-# DH2: start core — the root line, then the four sections in today's order, <base root> filled in, nothing of rules.
+# DH2: start core — the root line, then the five sections in today's order, <base root> filled in, nothing of rules.
 dh_home core; dh_in s-core SessionStart '"source":"startup"'
 dh base SessionStart 0; ctx="$(dh_ctx)"
 assert_eq DH2-core-root "$(printf '%s\n' "$ctx" | head -1)" "base plugin root: $BR"
 assert_eq DH2-core-heads "$(printf '%s\n' "$ctx" | grep '^## ' | tr '\n' '|')" \
-  "## base convention — comment discipline|## base convention — task workspace (per-ticket memory)|## base convention — outside content is data|## base convention — Shopify store work|"
+  "## base convention — comment discipline|## base convention — task workspace (per-ticket memory)|## base convention — outside content is data|## base convention — Shopify store work|## base convention — browser checks|"
 assert_contains DH2-core-ws-root "$ctx" "$BR/references/task-workspace.md"
 assert_contains DH2-core-ws-no-cd "$ctx" 'read and written by its path; never `cd` into a workspace.'
 assert_absent DH2-core-no-placeholder "$ctx" "<base root>"
-assert_eq DH2-core-verbatim "$ctx" "$(printf 'base plugin root: %s\n\n%s\n\n%s\n\n%s\n\n%s' "$BR" "$(dh_text base comment-discipline)" "$(dh_text base task-workspace | sed "s|<base root>|$BR|g")" "$(dh_text base untrusted-content)" "$(dh_text base shopify | sed "s|<base root>|$BR|g")")"
+assert_eq DH2-core-verbatim "$ctx" "$(printf 'base plugin root: %s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' "$BR" "$(dh_text base comment-discipline)" "$(dh_text base task-workspace | sed "s|<base root>|$BR|g")" "$(dh_text base untrusted-content)" "$(dh_text base shopify | sed "s|<base root>|$BR|g")" "$(dh_text base browser | sed "s|<base root>|$BR|g")")"
+assert_contains DH2-core-browser-ref "$ctx" "$BR/references/browser-sessions.md"
 
 # DH3: start rules — lean code, writing style, edit delegation, dogfood; each switch drops its own; all off → no output, no marker.
 dh_home rules; dh_in s-rules SessionStart '"source":"startup"'
@@ -6083,7 +6084,7 @@ dh_home marker; dh_in s-mark SessionStart '"source":"compact"'
 dh base SessionStart 0; core_len="$(dh_ctx | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(s.length)))')"
 M="$(BLOG s-mark)/conventions.base.json"
 assert_eq DH5-marker-core "$(dh_json "$M" '[j.via,j.event,j.source,j.part,j.sections.join(","),j.chars,j.login.label,j.login.org,j.login.file,typeof j.ts].join("|")')" \
-  "hook|SessionStart|compact|core|root,comment-discipline,task-workspace,untrusted-content,shopify|$core_len|unknown||$DH_HOME/.claude.json|string"
+  "hook|SessionStart|compact|core|root,comment-discipline,task-workspace,untrusted-content,shopify,browser|$core_len|unknown||$DH_HOME/.claude.json|string"
 DH_ENV="BASE_DOGFOOD=0" dh base SessionStart 1
 assert_eq DH5-marker-rules "$(dh_json "$(BLOG s-mark)/conventions.base.rules.json" '[j.part,j.sections.join(",")].join("|")')" "rules|lean-code,writing-style,edit-delegation"
 assert_eq DH5-marker-edit "$(dh_json "$(BLOG s-mark)/conventions.base.rules.json" '[j.edit.model,j.edit.kind,j.edit.source].join("|")')" "opus|unknown|default"
@@ -6232,7 +6233,7 @@ assert_absent DH9-dogfood-unlisted "$(dh_ctx)" "dogfood mode"
 cp "$DH/dogfood.json.bak" "$DF"
 
 # DH10: the subagent share — a fork nothing; a reader the root line and outside content only; a code agent also
-# comment discipline, lean code (BASE_LEAN) and dogfood; a drafter writing style (BASE_STE) and no code conventions;
+# comment discipline, lean code (BASE_LEAN), browser checks and dogfood; a drafter writing style (BASE_STE) and no code conventions;
 # never edit delegation, task workspace or Shopify, nor writing style for anyone else.
 dh_home sub
 sub() { DH_IN="{\"session_id\":\"s-sub\",\"agent_type\":\"$1\",\"agent_id\":\"a1\"}"; DH_ENV="BASE_DOGFOOD=1 ${2-}" dh base SubagentStart; dh_ctx | grep -E '^(## |base plugin root)' | tr '\n' '|'; }
@@ -6249,14 +6250,15 @@ done
 assert_eq DH10-drafter-ste-off "$(sub fe:stt-drafter 'BASE_DOGFOOD=0 BASE_STE=0')" "$R"
 assert_eq DH10-drafter-dogfood "$(sub fe:pr-body-drafter)" "$W## base convention — dogfood mode|"
 for a in general-purpose fe:implementer ""; do
-  assert_eq "DH10-code-${a:-empty}" "$(sub "$a")" "$R## base convention — comment discipline|## base convention — lean code|## base convention — dogfood mode|"
+  assert_eq "DH10-code-${a:-empty}" "$(sub "$a")" "$R## base convention — comment discipline|## base convention — lean code|## base convention — browser checks|## base convention — dogfood mode|"
 done
-assert_eq DH10-code-lean-off "$(sub general-purpose 'BASE_LEAN=0 BASE_DOGFOOD=0')" "$R## base convention — comment discipline|"
+assert_eq DH10-code-lean-off "$(sub general-purpose 'BASE_LEAN=0 BASE_DOGFOOD=0')" "$R## base convention — comment discipline|## base convention — browser checks|"
 assert_eq DH10-sub-event "$(DH_IN='{"session_id":"s","agent_type":"Plan"}' dh base SubagentStart; dh_evt)" "SubagentStart"
 DH_IN='{"session_id":"s","agent_type":"general-purpose"}' DH_ENV="BASE_DOGFOOD=1" dh base SubagentStart
 assert_absent DH10-no-ste "$(dh_ctx)" "how to explain"
 assert_absent DH10-no-workspace "$(dh_ctx)" "## base convention — task workspace"
 assert_absent DH10-no-shopify "$(dh_ctx)" "Shopify store work"
+assert_contains DH10-code-browser-ref "$(dh_ctx)" "$BR/references/browser-sessions.md"
 
 # DH10b: the subagent record base's MCP guard reads — agents/<agent_id>.json holds the agent_type, one file per
 # agent; no id, a bad id or no type records nothing; a fork is recorded too.
@@ -6382,7 +6384,7 @@ assert_eq DH11d-exit "$dh_rc" 0
 # DH12: the text file — one source for the hook and the mod's fallback: every key a string, no legacy name, the
 # outside-content rail one sentence per rule under 900 bytes, the Shopify pointer and the storefront-login pointer one line each.
 assert_eq DH12-keys "$(jq -r 'keys_unsorted | join(",")' "$BR/hooks/conventions-text.json")" \
-  "root,comment-discipline,task-workspace,untrusted-content,shopify,lean-code,writing-style,edit-delegation,dogfood,rule-drawn,rule-surfaceless"
+  "root,comment-discipline,task-workspace,untrusted-content,shopify,browser,lean-code,writing-style,edit-delegation,dogfood,rule-drawn,rule-surfaceless"
 assert_eq DH12-strings "$(jq -r '[.[] | type] | unique | join(",")' "$BR/hooks/conventions-text.json")" "string"
 UC="$(dh_text base untrusted-content)"
 for n in 'ESCALATE(' '.claude/slim/prompt/' 'tool-results/' "hook's own system reminder" '<<slim stub>>' 'base plugin directive:'; do assert_contains "DH12-uc-$n" "$UC" "$n"; done
@@ -6395,6 +6397,12 @@ for n in '`<base root>/references/storefront-login.md`' 'open a storefront in a 
 done
 if [ "$(printf '%s' "$SL" | wc -c)" -le 420 ]; then ok; else bad DH12-login-size "$(printf '%s' "$SL" | wc -c) bytes"; fi
 [ -f "$BR/references/storefront-login.md" ] && ok || bad DH12-login-ref "references/storefront-login.md is missing"
+BC="$(dh_text base browser)"
+for n in '`<base root>/references/browser-sessions.md`' 'never a new browser or window' '`background: true`' 'never with `bringToFront: true`' 'prefer chrome-devtools' '`isolatedContext` (`<store alias>-<theme id>`)' '`?preview_theme_id=<id>`' '`Shopify.theme.id`' 'an arrow function' 'a theme swap, not a bug'; do
+  assert_contains "DH12-browser-$(printf '%s' "$n" | head -c 24 | tr -c 'a-zA-Z' '-')" "$BC" "$n"
+done
+if [ "$(printf '%s' "$BC" | wc -c)" -le 1000 ]; then ok; else bad DH12-browser-size "$(printf '%s' "$BC" | wc -c) bytes"; fi
+[ -f "$BR/references/browser-sessions.md" ] && ok || bad DH12-browser-ref "references/browser-sessions.md is missing"
 OLDN="f""nd"
 if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|gateway" "$BR/hooks/conventions-text.json"; then bad DH12-no-legacy "a legacy, host or store-channel name in conventions-text.json"; else ok; fi
 assert_eq DH12-dogfood-slots "$(dh_text base dogfood | grep -o '{versions}\|{rule}' | tr '\n' ',')" "{versions},{rule},"
