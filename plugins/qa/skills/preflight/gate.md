@@ -174,8 +174,11 @@ test`. The storefront password is never part of a URL.
 
 ## Unlock and theme gate — Phase 3
 
-**Mechanics.** Per store: `new_page url: https://<domain>/password, isolatedContext: "<store
-alias>"` — the named context keeps two stores' password cookies apart. Keep the returned `pageId` and
+**Mechanics.** Per store and theme under test: `new_page url: https://<domain>/password,
+isolatedContext: "<store alias>-<theme id>"` (`<store alias>-live` for live), `background: true` —
+the named context keeps two stores' password cookies and two themes' preview cookies apart; a
+replacement theme opens its own context and unlocks again (base's `browser` convention,
+`<base root>/references/browser-sessions.md`). Keep the returned `pageId` and
 pass it on every later `fill` / `click` / `press_key` / `evaluate_script` / `emulate` /
 `take_screenshot`; finish one store's rows before touching the other's page. `evaluate_script` takes
 a function declaration (an arrow function), never a bare expression.
@@ -196,14 +199,9 @@ a function declaration (an arrow function), never a bare expression.
    stale: ask for the current one, `qa-stores.cjs set <domain> --password '<new>'` (quoting above),
    the notes line, retry. Two failures → **Block**, `storefront password rejected`; never a third try.
    Never capture a frame with the password field filled.
-2. **Theme gate** — open the target page at its page URL, then read:
-
-   ```js
-   () => (typeof Shopify === 'undefined' || !Shopify.theme)
-     ? { id: null, role: null, name: null, shop: null }
-     : { id: String(Shopify.theme.id), role: Shopify.theme.role, name: Shopify.theme.name,
-         shop: Shopify.shop }
-   ```
+2. **Theme gate** — open the target page at its page URL, then read the served theme with base's
+   one read, `{ id, role, name, shop }` (`<base root>/references/browser-sessions.md` → rule 5, its
+   `evaluate_script` snippet verbatim).
 
    `shop` (`<handle>.myshopify.com`) builds Block 2's admin URLs; it is never a gate criterion.
 

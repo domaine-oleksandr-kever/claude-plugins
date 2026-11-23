@@ -52,10 +52,10 @@ Fields written before the four-item format are still read; nothing writes them a
 
 ## Running the rows
 
-**Two passes, desktop then mobile.** `emulate pageId, viewport: "1440x900x1"` and reload, run every
-row; then `emulate pageId, viewport: "375x812x3,mobile,touch"` and reload, run every row again — a
-resized desktop window misses touch-only behaviour. Reload after each `emulate` so load-time gates
-re-run. **Before each pass**, and within a pass before every row that starts a fresh scenario (an
+**Two passes, desktop then mobile.** `emulate pageId, viewport: "1440x900x1"`, reopen the page URL
+(gate.md → Page URLs; never a plain reload), run every row; then `emulate pageId, viewport:
+"375x812x3,mobile,touch"`, reopen it, run every row again — a resized desktop window misses
+touch-only behaviour. Reopen after each `emulate` so load-time gates re-run. **Before each pass**, and within a pass before every row that starts a fresh scenario (an
 AC row, an edge case, an older shape's scenario), the cart is empty and no checkout is open — clear
 it or abandon the checkout.
 
